@@ -1,0 +1,38 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+publish/
+
+# Local Macro Deck SDK packages built by `dotnet pack`
+local-feed/*
+!local-feed/.gitkeep
+
+# Local state written by the real-host launch profile
+**/.macrodeck-dev-state/
+
+# Test output
+TestResults/
+*.trx
+
+# IDEs and editors
+.vs/
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+/logs/

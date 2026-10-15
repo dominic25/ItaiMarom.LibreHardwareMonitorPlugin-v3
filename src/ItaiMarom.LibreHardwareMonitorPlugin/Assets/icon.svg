@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Libre Hardware Monitor">
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="24" fill="#0f172a"/>
+  <g fill="none" stroke="url(#accent)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="36" y="36" width="56" height="56" rx="10"/>
+    <path d="M52 36V24M76 36V24M52 104V92M76 104V92M36 52H24M36 76H24M104 52H92M104 76H92"/>
+  </g>
+  <rect x="54" y="54" width="20" height="20" rx="4" fill="url(#accent)"/>
+</svg>

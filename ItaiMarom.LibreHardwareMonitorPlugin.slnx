@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/solution/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="NuGet.config" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/ItaiMarom.LibreHardwareMonitorPlugin/ItaiMarom.LibreHardwareMonitorPlugin.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ItaiMarom.LibreHardwareMonitorPlugin.Tests/ItaiMarom.LibreHardwareMonitorPlugin.Tests.csproj" />
+  </Folder>
+</Solution>

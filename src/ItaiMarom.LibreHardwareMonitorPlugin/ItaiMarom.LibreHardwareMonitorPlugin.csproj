@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!-- A Macro Deck 3 plugin is an out-of-process console app, not a class library loaded into
+             the host. -->
+        <OutputType>Exe</OutputType>
+        <!-- Pinned rather than taken from the project file name: manifest.json declares this executable
+             name, and the generated Strings class lives in this namespace. -->
+        <AssemblyName>ItaiMarom.LibreHardwareMonitorPlugin</AssemblyName>
+        <RootNamespace>ItaiMarom.LibreHardwareMonitorPlugin</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- The generated Strings class and LocalizedText are part of this project's own source. -->
+        <PackageReference Include="MacroDeck.Localization" />
+        <PackageReference Include="MacroDeck.Plugin.Hosting" />
+        <PackageReference Include="MacroDeck.Plugin.Serilog" />
+        <PackageReference Include="MacroDeck.Sdk" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Build-time analyzers only, never shipped. -->
+        <PackageReference Include="MacroDeck.Plugin.Analyzers" PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The hardware layer, consumed directly. Wired into the polling loop in the hardware step. -->
+        <PackageReference Include="LibreHardwareMonitorLib" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The SDK reads the manifest from the content root at startup and resolves the icon path
+             against that same root, so both have to land next to the built executable. -->
+        <Content Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="Assets\icon.svg" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+</Project>

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schemas.macro-deck.app/plugin-manifest-v1.schema.json",
+  "manifestVersion": 1,
+  "id": "itaimarom.libre-hardware-monitor",
+  "name": "Libre Hardware Monitor Plugin",
+  "version": "1.0.0",
+  "description": "Reads CPU, GPU, memory, motherboard, storage and network sensors from LibreHardwareMonitor and exposes them as Macro Deck variables, with no separate monitoring application running.",
+  "icon": "Assets/icon.svg",
+  "entrypoints": {
+    "win-x64": {
+      "executable": "runtimes/win-x64/ItaiMarom.LibreHardwareMonitorPlugin.dll",
+      "runtime": {
+        "kind": "FrameworkDependent",
+        "dotnetVersion": "10.0"
+      }
+    }
+  },
+  "publisher": {
+    "name": "ItaiMarom"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/dominic25/ItaiMarom.LibreHardwareMonitorPlugin-v3",
+  "compatibility": {
+    "macroDeck": ">=3.0.0-0"
+  }
+}
