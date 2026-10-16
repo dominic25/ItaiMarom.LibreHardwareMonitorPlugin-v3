@@ -1,0 +1,324 @@
+using System.Globalization;
+using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using MacroDeck.Localization;
+using MacroDeck.Sdk.Variables;
+
+namespace ItaiMarom.LibreHardwareMonitorPlugin.Variables;
+
+/// <summary>
+/// Serves the plugin's variables: the selected sensors as eager variables, and the whole sensor tree as a
+/// browsable catalog.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Nothing here touches the hardware library. Values come out of the cache
+/// <see cref="HardwareMonitor"/> fills on its own thread, so a read is a dictionary lookup and never a
+/// SMART query, and the session is never made to wait for a device. The one exception is the catalog:
+/// browsing it is a deliberate, user-initiated act, so it is allowed to ask the monitor to enumerate.
+/// </para>
+/// <para>
+/// The provider keeps no state of its own beyond a cache of that enumeration, so a read for a sensor the
+/// plugin has never heard of answers "unavailable" rather than throwing - which is what the host expects
+/// for a reference read back out of a profile that has since had the hardware removed.
+/// </para>
+/// </remarks>
+public sealed class SensorVariableProvider : IVariableProvider, IDisposable
+{
+	/// <summary>How long a catalog enumeration is reused before the next browse asks the hardware again.</summary>
+	private static readonly TimeSpan CatalogLifetime = TimeSpan.FromSeconds(30);
+
+	/// <summary>Most entries served in one catalog page, whatever the host asks for.</summary>
+	private const int MaxPageSize = 200;
+
+	private readonly HardwareMonitor _monitor;
+	private readonly SensorSelection _selection;
+	private readonly SemaphoreSlim _tableGate = new(1, 1);
+
+	private CatalogSnapshot? _snapshot;
+
+	private IReadOnlyList<SensorVariable>? _eager;
+	private IReadOnlyList<SensorIdentifier>? _eagerFor;
+
+	public SensorVariableProvider(HardwareMonitor monitor, SensorSelection selection)
+	{
+		_monitor = monitor ?? throw new ArgumentNullException(nameof(monitor));
+		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
+	}
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// Empty until the plugin is configured or a Macro Deck 2 configuration has been migrated, and
+	/// <see cref="VariablesDependOnConfiguration"/> says so. The catalog is how a user reaches every other
+	/// sensor.
+	/// </remarks>
+	public IReadOnlyList<VariableDefinition> Variables =>
+		EagerVariables().Select(variable => variable.EagerDefinition()).ToArray();
+
+	/// <inheritdoc />
+	public bool VariablesDependOnConfiguration => true;
+
+	/// <inheritdoc />
+	public bool SupportsCatalog => true;
+
+	/// <inheritdoc />
+	public bool SupportsSearch => true;
+
+	/// <inheritdoc />
+	public ValueTask<VariableReading> ReadAsync(string localId, CancellationToken cancellationToken = default)
+	{
+		// A cancellation token has nowhere to go here on purpose: answering from a dictionary is not work
+		// worth cancelling, and doing it synchronously is what keeps a read off the session's critical path.
+		return new ValueTask<VariableReading>(
+			TryResolveSensor(localId, out var sensor) && _monitor.TryGetReading(sensor, out var value)
+				? VariableReading.Of(value)
+				: VariableReading.Unavailable);
+	}
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// This is where the working set is narrowed: the loop is told to read the eager sensors - which the
+	/// host polls directly - plus whatever catalog resources are bound, and to forget the rest, so an
+	/// unbound sensor stops costing a read rather than quietly going stale.
+	/// </remarks>
+	public async ValueTask<IReadOnlyList<VariableValue>> SubscribeAsync(
+		IReadOnlyCollection<string> localIds,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(localIds);
+
+		var watched = new HashSet<SensorIdentifier>(_selection.Sensors);
+		if (localIds.Count > 0)
+		{
+			var table = await GetTableAsync(refresh: false, cancellationToken).ConfigureAwait(false);
+			foreach (var localId in localIds)
+			{
+				if (table.TryGetSensor(localId, out var sensor))
+				{
+					watched.Add(sensor);
+				}
+			}
+		}
+
+		_monitor.SetWatchedSensors(watched);
+
+		// Pushing is off, so the host reads what it needs; there is no benefit in handing back a snapshot
+		// it is about to ask for one variable at a time anyway.
+		return Array.Empty<VariableValue>();
+	}
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// Deliberately permissive: any legal resource id resolves, even one for hardware that is not
+	/// installed right now, because a reference read back out of a profile months later is worth keeping
+	/// and reading as unavailable rather than being reported as broken.
+	/// </remarks>
+	public ValueTask<VariableDefinition?> ResolveAsync(string localId, CancellationToken cancellationToken = default)
+	{
+		foreach (var variable in EagerVariables())
+		{
+			if (string.Equals(variable.Id, localId, StringComparison.Ordinal))
+			{
+				return new ValueTask<VariableDefinition?>(variable.EagerDefinition());
+			}
+		}
+
+		if (!VariableNaming.IsValidResourceId(localId))
+		{
+			return ValueTask.FromResult<VariableDefinition?>(null);
+		}
+
+		// Already-enumerated hardware gives the description back verbatim - the unit, the precision, the
+		// name it was offered under - so a restored binding looks exactly as it did when it was made.
+		var table = Volatile.Read(ref _snapshot)?.Table;
+		if (table is not null && table.TryGetSensor(localId, out var sensor))
+		{
+			return new ValueTask<VariableDefinition?>(SensorDefinition(sensor, localId, parentId: null));
+		}
+
+		return new ValueTask<VariableDefinition?>(VariableDefinition.OnDemand(localId, VariableType.Numeric));
+	}
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// A null <see cref="VariableCatalogQuery.ParentId"/> lists the hardware; a parent id lists that
+	/// hardware's sensors; a search filters the whole tree and ignores the parent, because a search that
+	/// only looked inside the folder the user happens to be in would be a strange search.
+	/// </remarks>
+	public async ValueTask<VariableCatalogPage> DiscoverAsync(
+		VariableCatalogQuery query,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(query);
+
+		SensorCatalogTable table;
+		try
+		{
+			table = await GetTableAsync(refresh: true, cancellationToken).ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is not OperationCanceledException)
+		{
+			// Enumerating hardware can fail - a driver that refuses to answer, a device pulled mid-read.
+			// An empty page is the honest answer; the host shows a catalog with nothing in it.
+			return VariableCatalogPage.Empty;
+		}
+
+		var offset = ParseOffset(query.ContinuationToken);
+
+		if (!string.IsNullOrWhiteSpace(query.Search))
+		{
+			var matches = table.Sensors.Where(entry => Matches(entry.Sensor, query.Search)).ToArray();
+			return Page(matches, query.PageSize, offset, entry => SensorDefinition(entry.Sensor, entry.Id, entry.ParentId));
+		}
+
+		if (string.IsNullOrEmpty(query.ParentId))
+		{
+			return Page(table.Hardware, query.PageSize, offset, HardwareDefinition);
+		}
+
+		return table.TryGetHardware(query.ParentId, out var node)
+			? Page(node.Entries, query.PageSize, offset, entry => SensorDefinition(entry.Sensor, entry.Id, node.Id))
+			: VariableCatalogPage.Empty;
+	}
+
+	/// <summary>Releases the gate that serializes catalog enumeration.</summary>
+	public void Dispose() => _tableGate.Dispose();
+
+	/// <summary>
+	/// The eager variables for the current selection, computed once per selection rather than once per
+	/// call. The two fields are not synchronized: a racing reader can only see a stale pairing, recompute
+	/// from the same selection, and store the same answer.
+	/// </summary>
+	private IReadOnlyList<SensorVariable> EagerVariables()
+	{
+		var sensors = _selection.Sensors;
+		if (_eager is { } cached && ReferenceEquals(sensors, _eagerFor))
+		{
+			return cached;
+		}
+
+		var assigned = SensorVariableNaming.Assign(sensors);
+
+		_eagerFor = sensors;
+		_eager = assigned;
+		return assigned;
+	}
+
+	private bool TryResolveSensor(string localId, out SensorIdentifier sensor)
+	{
+		foreach (var variable in EagerVariables())
+		{
+			if (string.Equals(variable.Id, localId, StringComparison.Ordinal))
+			{
+				sensor = variable.Sensor;
+				return true;
+			}
+		}
+
+		// The catalog is only consulted from a snapshot: a read must not be the thing that triggers an
+		// enumeration, or a single variable read could block on a disk. The host binds a resource before
+		// it reads it, and binding subscribes, which builds the table.
+		var table = Volatile.Read(ref _snapshot)?.Table;
+		if (table is not null && table.TryGetSensor(localId, out var found))
+		{
+			sensor = found;
+			return true;
+		}
+
+		sensor = null!;
+		return false;
+	}
+
+	private async ValueTask<SensorCatalogTable> GetTableAsync(bool refresh, CancellationToken cancellationToken)
+	{
+		var snapshot = Volatile.Read(ref _snapshot);
+		if (IsUsable(snapshot, refresh))
+		{
+			return snapshot!.Table;
+		}
+
+		await _tableGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			snapshot = Volatile.Read(ref _snapshot);
+			if (IsUsable(snapshot, refresh))
+			{
+				return snapshot!.Table;
+			}
+
+			var sensors = await _monitor.EnumerateSensorsAsync(cancellationToken).ConfigureAwait(false);
+			var table = SensorCatalogTable.Build(sensors);
+			Volatile.Write(ref _snapshot, new CatalogSnapshot(table, DateTimeOffset.UtcNow));
+			return table;
+		}
+		finally
+		{
+			_tableGate.Release();
+		}
+	}
+
+	private static bool IsUsable(CatalogSnapshot? snapshot, bool refresh) =>
+		snapshot is not null
+		&& (!refresh || DateTimeOffset.UtcNow - snapshot.BuiltAt < CatalogLifetime);
+
+	private static bool Matches(SensorIdentifier sensor, string search) =>
+		sensor.SensorName.Contains(search, StringComparison.OrdinalIgnoreCase)
+		|| sensor.VariableName.Contains(search, StringComparison.OrdinalIgnoreCase)
+		|| sensor.SensorType.ToString().Contains(search, StringComparison.OrdinalIgnoreCase)
+		|| sensor.Hardware.RootName.Contains(search, StringComparison.OrdinalIgnoreCase)
+		|| sensor.Hardware.Path.Contains(search, StringComparison.OrdinalIgnoreCase);
+
+	private static VariableDefinition HardwareDefinition(SensorCatalogNode node) =>
+		VariableDefinition.OnDemand(node.Id, VariableType.Numeric) with
+		{
+			Name = VariableNaming.Sanitize(node.Name),
+			DisplayName = LocalizedText.FromLiteral(node.Name),
+			IsContainer = true,
+			IsBindable = false,
+		};
+
+	private static VariableDefinition SensorDefinition(SensorIdentifier sensor, string resourceId, string? parentId) =>
+		VariableDefinition.OnDemand(resourceId, VariableType.Numeric) with
+		{
+			// The host re-derives and de-duplicates a catalog name anyway, so the plain Macro Deck 2 name is
+			// the best suggestion: it is what a user already knows the sensor as.
+			Name = sensor.VariableName,
+			DisplayName = LocalizedText.FromLiteral(sensor.DisplayName),
+			DecimalPlaces = SensorFormatting.DecimalPlaces(sensor.SensorType),
+			Unit = SensorFormatting.Unit(sensor.SensorType),
+			SemanticKind = SensorFormatting.SemanticKind(sensor.SensorType),
+			ParentId = parentId,
+		};
+
+	private static VariableCatalogPage Page<T>(
+		IReadOnlyList<T> items,
+		int requestedPageSize,
+		int offset,
+		Func<T, VariableDefinition> select)
+	{
+		var size = requestedPageSize > 0 ? Math.Min(requestedPageSize, MaxPageSize) : MaxPageSize;
+		var start = Math.Clamp(offset, 0, items.Count);
+		var count = Math.Min(size, items.Count - start);
+
+		var page = new List<VariableDefinition>(count);
+		for (var index = start; index < start + count; index++)
+		{
+			page.Add(select(items[index]));
+		}
+
+		var next = start + count;
+		return new VariableCatalogPage
+		{
+			Items = page,
+			ContinuationToken = next < items.Count
+				? next.ToString(CultureInfo.InvariantCulture)
+				: null,
+		};
+	}
+
+	private static int ParseOffset(string? continuationToken) =>
+		int.TryParse(continuationToken, NumberStyles.Integer, CultureInfo.InvariantCulture, out var offset) && offset > 0
+			? offset
+			: 0;
+
+	private sealed record CatalogSnapshot(SensorCatalogTable Table, DateTimeOffset BuiltAt);
+}

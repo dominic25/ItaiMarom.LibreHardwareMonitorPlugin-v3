@@ -10,12 +10,5 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 /// Null when the sensor is present but has no reading right now - which is normal, not an error: a
 /// stopped fan, a disk that did not answer, or a sensor before its first update.
 /// </param>
-public readonly record struct HardwareSensor(
-	string HardwarePath,
-	string SensorName,
-	SensorType SensorType,
-	float? Value)
-{
-	/// <summary>This sample's stable identity.</summary>
-	public SensorIdentifier Identifier => new(HardwarePath, SensorName, SensorType);
-}
+public readonly record struct HardwareSensor(SensorIdentifier Sensor, float? Value);
+

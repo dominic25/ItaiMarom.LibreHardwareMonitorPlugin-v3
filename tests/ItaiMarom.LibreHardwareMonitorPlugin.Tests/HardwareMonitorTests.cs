@@ -14,7 +14,7 @@ public sealed class HardwareMonitorTests
 {
 	private static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
 
-	private static readonly SensorIdentifier CpuLoad = new("CPU", "CPU Total", SensorType.Load);
+	private static readonly SensorIdentifier CpuLoad = TestSensor.Create("CPU", "CPU Total", SensorType.Load);
 
 	private static readonly string[] CpuHardwareOnly = ["CPU"];
 
@@ -91,7 +91,7 @@ public sealed class HardwareMonitorTests
 		monitor.SetWatchedSensors([CpuLoad]);
 		monitor.Start();
 
-		var gpu = new SensorIdentifier("GPU", "GPU Core", SensorType.Temperature);
+		var gpu = TestSensor.Create("GPU", "GPU Core", SensorType.Temperature);
 		await WaitUntilAsync(() => monitor.TryGetReading(CpuLoad, out _));
 
 		Assert.That(monitor.TryGetReading(gpu, out _), Is.False);
@@ -125,7 +125,7 @@ public sealed class HardwareMonitorTests
 		monitor.Start();
 		await WaitUntilAsync(() => monitor.TryGetReading(CpuLoad, out _));
 
-		source.Set("CPU Total", null);
+		source.Set(CpuLoad, null);
 
 		// A device that really went away must stop reporting a value that is no longer true.
 		await WaitUntilAsync(() => !monitor.TryGetReading(CpuLoad, out _));

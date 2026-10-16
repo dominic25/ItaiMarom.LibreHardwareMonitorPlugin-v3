@@ -48,7 +48,7 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 			// IHardware.Update walks into the sub-hardware itself, which is where a motherboard's
 			// super-I/O sensors live - the ones the old plugin never listed.
 			hardware.Update();
-			Collect(hardware, parentPath: string.Empty, sensors);
+			Collect(hardware, HardwareLocation.Root(hardware.Identifier.ToString(), hardware.Name), sensors);
 		}
 
 		return sensors;
@@ -57,18 +57,22 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 	/// <inheritdoc />
 	public void Dispose() => _computer.Close();
 
-	private static void Collect(IHardware hardware, string parentPath, List<HardwareSensor> into)
+	private static void Collect(IHardware hardware, HardwareLocation location, List<HardwareSensor> into)
 	{
-		var path = parentPath.Length == 0 ? hardware.Name : $"{parentPath}/{hardware.Name}";
-
 		foreach (var sensor in hardware.Sensors)
 		{
-			into.Add(new HardwareSensor(path, sensor.Name, sensor.SensorType, sensor.Value));
+			var identifier = new SensorIdentifier(
+				location,
+				sensor.Identifier.ToString(),
+				sensor.Name,
+				sensor.SensorType);
+
+			into.Add(new HardwareSensor(identifier, sensor.Value));
 		}
 
 		foreach (var subHardware in hardware.SubHardware)
 		{
-			Collect(subHardware, path, into);
+			Collect(subHardware, location.Child(subHardware.Identifier.ToString(), subHardware.Name), into);
 		}
 	}
 }

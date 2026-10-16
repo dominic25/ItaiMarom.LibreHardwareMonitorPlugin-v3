@@ -31,9 +31,16 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     LibreHardwareMonitorSource.cs      the real LibreHardwareMonitor Computer
     HardwareMonitor.cs                 the background polling loop and its reading cache
     HardwareMonitorOptions.cs          polling interval and staleness
+    HardwareLocation.cs                where a sensor sits in the hardware tree
     SensorIdentifier.cs                stable sensor identity and variable naming
     SensorFormatting.cs                how a reading is presented (decimals, unit, semantic kind)
     HardwareSensor.cs                  one sample from a source
+  Variables/
+    SensorSelection.cs                 the sensors that become declared variables
+    SensorVariable.cs                  a selected sensor and the name/id it is exposed under
+    SensorVariableNaming.cs            collision policy for names and declared ids
+    SensorCatalogTable.cs              the hardware tree flattened for browsing
+    SensorVariableProvider.cs          the IVariableProvider: reads, catalog, subscriptions
   manifest.json                        plugin identity, icon, entrypoints
   macrodeck-build.json                 per-RID publish recipe used by the CLI
   Assets/icon.svg                      plugin icon
@@ -50,11 +57,38 @@ a SMART query, so it is never touched from anything that serves the Macro Deck s
   `SemaphoreSlim` serialises that caller against the two other places hardware is touched (opening, and
   reading the whole tree for the sensor picker).
 - Each poll writes into an in-memory dictionary of the newest reading per watched sensor.
-- Readers - the variable provider, once it lands - take the dictionary's current value. There is no
-  `await` between a Macro Deck request and its answer, and no lock is ever held across a call into the
-  hardware library.
+- Readers - the variable provider - take the dictionary's current value. There is no `await` between a
+  Macro Deck request and its answer, and no lock is ever held across a call into the hardware library.
 - A reading older than `StaleAfter` is dropped, so a device that really went away stops reporting a value
   that is no longer true.
+
+## How the variables are exposed
+
+The Macro Deck 2 plugin's variables were whatever the user had configured, and a layout referred to one by
+name (`{{cpu_core__1_temperature}}`). Both halves of that are preserved:
+
+- **Declared (eager) variables** - the sensors the user - or the Macro Deck 2 migration - selected. Each is
+  registered with the host under the exact name the old plugin published, so an upgraded layout resolves
+  unchanged. Nothing is declared until a configuration produces a selection;
+  `VariablesDependOnConfiguration` tells the host to ask again when one changes.
+- **A browsable catalog** - every sensor in the machine, grouped by top-level hardware. A user reaches
+  anything the old plugin did not have, binds it by name, and the binding is stored under the sensor's
+  library identifier - which does not move when a display name is re-derived.
+
+A few decisions worth knowing about:
+
+- **Names collide** (`GPU Core` on two graphics cards). The first sensor keeps the old name; the rest get a
+  hardware-qualified one. Which is "first" is decided by name and then by device path, not by enumeration
+  order, so a restart cannot renumber a user's buttons.
+- **Ids are derived from the library identifier, not the name**, because the identifier is what is unique
+  and stable. `VariableDefinitionId.FromName` returns an empty id for a name with an underscore in it -
+  which is what every old name has - so every eager definition sets its `Id` explicitly.
+- **A poll and a read never touch the hardware library directly.** A read answers from the cache and says
+  "unavailable" for anything it has not seen, so a profile opened on a machine without that hardware binds
+  and reads as unavailable rather than blocking the session on enumeration. Only browsing the catalog is
+  allowed to enumerate, because that is a deliberate, user-initiated act.
+- **Values are not truncated.** The old plugin stored some sensor kinds through `(int)value`; here the full
+  precision is kept and `DecimalPlaces` reproduces the rendered text the old plugin showed.
 
 
 ## Build
@@ -93,7 +127,7 @@ Step-by-step port from the Macro Deck 2 plugin:
 
 - [x] Repository and project scaffolding
 - [x] Hardware polling (out-of-process lifecycle)
-- [ ] Variable provider
+- [x] Variable surface (declared variables + browsable catalog)
 - [ ] Configuration
 - [ ] Macro Deck 2 settings migration
 

@@ -190,7 +190,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		try
 		{
 			EnsureOpen();
-			return _source.Read(null).Select(sample => sample.Identifier).ToArray();
+			return _source.Read(null).Select(sample => sample.Sensor).ToArray();
 		}
 		finally
 		{
@@ -308,9 +308,9 @@ public sealed class HardwareMonitor : IAsyncDisposable
 			{
 				// A sample with no value holds no value: leave what the last poll saw rather than deleting
 				// it, so a single null does not make a variable blink out and back within one interval.
-				if (sample.Value is { } value && _watched.Contains(sample.Identifier))
+				if (sample.Value is { } value && _watched.Contains(sample.Sensor))
 				{
-					_readings[sample.Identifier] = new Reading(value, sampledAt);
+					_readings[sample.Sensor] = new Reading(value, sampledAt);
 				}
 			}
 

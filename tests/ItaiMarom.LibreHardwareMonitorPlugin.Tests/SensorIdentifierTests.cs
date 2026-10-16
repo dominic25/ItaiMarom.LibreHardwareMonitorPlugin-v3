@@ -10,7 +10,7 @@ public sealed class SensorIdentifierTests
 	[Test]
 	public void The_legacy_token_is_what_the_old_configuration_stored()
 	{
-		var sensor = new SensorIdentifier("AMD Ryzen 7 5800X", "CPU Total", SensorType.Load);
+		var sensor = TestSensor.Create("AMD Ryzen 7 5800X", "CPU Total", SensorType.Load);
 
 		Assert.That(sensor.LegacyToken, Is.EqualTo("CPU Total_Load"));
 	}
@@ -18,7 +18,7 @@ public sealed class SensorIdentifierTests
 	[Test]
 	public void A_legacy_name_keeps_its_runs_of_underscores()
 	{
-		var sensor = new SensorIdentifier("CPU", "CPU Core #1", SensorType.Temperature);
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
 
 		// The old plugin replaced ' ' and '#' separately, so the name really does have two underscores,
 		// and a Macro Deck 3 canonicalizer would collapse them. Keeping the old spelling is the difference
@@ -31,25 +31,54 @@ public sealed class SensorIdentifierTests
 	public void A_legacy_name_the_host_would_reject_falls_back_to_a_canonical_one()
 	{
 		// A canonical name has to start with a letter, and this one does not.
-		var sensor = new SensorIdentifier("Motherboard", "3VSB", SensorType.Voltage);
+		var sensor = TestSensor.Create("Motherboard", "3VSB", SensorType.Voltage);
 
 		Assert.That(sensor.LegacyVariableName, Is.EqualTo("3vsb_voltage"));
 		Assert.That(sensor.VariableName, Is.EqualTo("v_3vsb_voltage"));
 	}
 
 	[Test]
-	public void The_root_hardware_is_the_first_segment_of_the_path()
+	public void The_root_hardware_is_the_top_of_the_branch_a_sub_device_hangs_off()
 	{
-		var sensor = new SensorIdentifier("Motherboard/ITE IT8688E", "Fan #1", SensorType.Fan);
+		var sensor = TestSensor.Create("Motherboard", "Fan #1", SensorType.Fan, subHardwareName: "ITE IT8688E");
 
+		Assert.That(sensor.Hardware.Path, Is.EqualTo("Motherboard/ITE IT8688E"));
 		Assert.That(sensor.RootHardwareName, Is.EqualTo("Motherboard"));
 	}
 
 	[Test]
 	public void A_sensor_with_no_sub_hardware_is_its_own_root()
 	{
-		var sensor = new SensorIdentifier("NVIDIA GeForce RTX 3080", "GPU Core", SensorType.Temperature);
+		var sensor = TestSensor.Create("NVIDIA GeForce RTX 3080", "GPU Core", SensorType.Temperature);
 
 		Assert.That(sensor.RootHardwareName, Is.EqualTo("NVIDIA GeForce RTX 3080"));
+	}
+
+	[Test]
+	public void A_variable_id_is_derived_from_the_library_identifier_not_the_name()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+
+		// The name would give "cpu-core-1-temperature" - and so would the second core of a second, identical
+		// processor. The library identifier is what tells them apart.
+		Assert.That(sensor.VariableId, Is.EqualTo("test-cpu-temperature-cpu-core-1"));
+	}
+
+	[Test]
+	public void A_resource_id_keeps_the_library_identifier_readable()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+
+		// Catalog ids may carry '/', so a user reading a resource id can still see where the sensor lives.
+		Assert.That(sensor.ResourceId, Is.EqualTo("/test/cpu/temperature/cpu-core-1"));
+		Assert.That(VariableNaming.IsValidResourceId(sensor.ResourceId), Is.True);
+	}
+
+	[Test]
+	public void The_display_name_carries_the_kind_because_the_name_alone_is_ambiguous()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+
+		Assert.That(sensor.DisplayName, Is.EqualTo("CPU Core #1 (Temperature)"));
 	}
 }

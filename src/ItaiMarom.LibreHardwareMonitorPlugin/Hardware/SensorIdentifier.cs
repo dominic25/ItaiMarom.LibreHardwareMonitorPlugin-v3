@@ -4,17 +4,27 @@ using LibreHardwareMonitor.Hardware;
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 
 /// <summary>
-/// Stable identity of one LibreHardwareMonitor sensor: the hardware that exposes it, its name and its
-/// kind. Everything the plugin caches, configures or migrates is keyed by this.
+/// Stable identity of one LibreHardwareMonitor sensor: the hardware that exposes it, its own library
+/// identifier and name, and its kind. Everything the plugin caches, configures or migrates is keyed by
+/// this.
 /// </summary>
-/// <param name="HardwarePath">
-/// The owning hardware's path, <c>Parent/Child</c> for sub-hardware. The Macro Deck 2 plugin only ever
-/// looked at top-level hardware, so a motherboard's super-I/O sensors - the ones that carry the voltages
-/// and fan speeds - were invisible to it. Walking the whole tree is why the path can have a slash in it.
+/// <param name="Hardware">
+/// The owning hardware. The Macro Deck 2 plugin only ever looked at top-level hardware, so a
+/// motherboard's super-I/O sensors - the ones that carry the voltages and fan speeds - were invisible to
+/// it. Walking the whole tree is why the hardware carries a <c>Parent/Child</c> path.
+/// </param>
+/// <param name="Id">
+/// The hardware library's own sensor identifier, for example <c>/lpc/nct6776f/0/temperature/1</c>. It is
+/// the one part of a sensor that is both unique and unchanged across restarts, so it - not the display
+/// name - is what the generated variable id is derived from.
 /// </param>
 /// <param name="SensorName">The library's sensor name, for example <c>CPU Core #1</c>.</param>
 /// <param name="SensorType">The kind of reading, which also decides how the value is formatted.</param>
-public sealed record SensorIdentifier(string HardwarePath, string SensorName, SensorType SensorType)
+public sealed record SensorIdentifier(
+	HardwareLocation Hardware,
+	string Id,
+	string SensorName,
+	SensorType SensorType)
 {
 	/// <summary>Replaces every character Macro Deck 2 refused to put in a variable name.</summary>
 	private static readonly Regex LegacyUnsafeCharacters =
@@ -27,14 +37,24 @@ public sealed record SensorIdentifier(string HardwarePath, string SensorName, Se
 	public string LegacyToken => $"{SensorName}_{SensorType}";
 
 	/// <summary>The name of the top-level hardware this sensor hangs off.</summary>
-	public string RootHardwareName
-	{
-		get
-		{
-			var separator = HardwarePath.IndexOf('/', StringComparison.Ordinal);
-			return separator < 0 ? HardwarePath : HardwarePath[..separator];
-		}
-	}
+	public string RootHardwareName => Hardware.RootName;
+
+	/// <summary>
+	/// The declared local id of the eager variable for this sensor: derived from the library's stable
+	/// identifier, so it survives a restart and a rename. Unique per sensor unless two identifiers
+	/// sanitise alike, which <see cref="Variables.SensorVariableNaming"/> then settles.
+	/// </summary>
+	public string VariableId => VariableNaming.ToDeclaredId(Id);
+
+	/// <summary>
+	/// The catalog resource id for this sensor. This SDK build's catalog ids may carry any character but
+	/// the <c>::</c> separator, whitespace and control characters, so the library identifier - which is
+	/// already unique, stable and slash-separated - passes through readable.
+	/// </summary>
+	public string ResourceId => VariableNaming.ToResourceId(Id);
+
+	/// <summary>What a user sees in the variable browser, for example <c>CPU Core #1 (Temperature)</c>.</summary>
+	public string DisplayName => $"{SensorName} ({SensorType})";
 
 	/// <summary>
 	/// Macro Deck 2's variable name reproduced exactly: the legacy token with every non-alphanumeric
@@ -74,7 +94,7 @@ public sealed record SensorIdentifier(string HardwarePath, string SensorName, Se
 
 			// Unreachable for any real sensor - a sensor type is always letters - but a variable name has
 			// to be legal whatever the hardware library reports.
-			var qualified = VariableNaming.Sanitize($"{HardwarePath} {LegacyToken}");
+			var qualified = VariableNaming.Sanitize($"{Hardware.Path} {LegacyToken}");
 			return VariableNaming.IsValid(qualified) ? qualified : "v_sensor";
 		}
 	}

@@ -9,7 +9,7 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
 /// </summary>
 internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 {
-	private readonly List<Sensor> _sensors = [];
+	private readonly List<Entry> _entries = [];
 
 	/// <summary>How many times the loop opened the hardware.</summary>
 	public int OpenCount { get; private set; }
@@ -28,22 +28,35 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	/// <summary>Runs inside <see cref="Read"/>, on the loop's thread. Used to block or observe a poll.</summary>
 	public Action? OnRead { get; set; }
 
-	/// <summary>Registered sensors in the order they were added.</summary>
-	public IReadOnlyList<(string HardwarePath, string SensorName, SensorType SensorType, float? Value)> Sensors =>
-		_sensors.Select(sensor => (sensor.HardwarePath, sensor.SensorName, sensor.SensorType, sensor.Value)).ToArray();
+	/// <summary>The registered sensors, in the order they were added.</summary>
+	public IReadOnlyList<SensorIdentifier> Sensors =>
+		_entries.Select(entry => entry.Sensor).ToArray();
 
-	/// <summary>Adds a sensor to the fake hardware tree.</summary>
-	public FakeHardwareSensorSource Add(string hardwarePath, string sensorName, SensorType sensorType, float? value = null)
+	/// <summary>Adds a sensor built from the pieces a test usually has to hand.</summary>
+	public FakeHardwareSensorSource Add(
+		string hardwareName,
+		string sensorName,
+		SensorType sensorType,
+		float? value = null) =>
+		Add(TestSensor.Create(hardwareName, sensorName, sensorType), value);
+
+	/// <summary>Adds an already-built sensor to the fake hardware tree.</summary>
+	public FakeHardwareSensorSource Add(SensorIdentifier sensor, float? value = null)
 	{
-		_sensors.Add(new Sensor(hardwarePath, sensorName, sensorType, value));
+		_entries.Add(new Entry(sensor, value));
 		return this;
 	}
 
 	/// <summary>Sets the value the next poll reports for a sensor, or null to report "no reading".</summary>
-	public FakeHardwareSensorSource Set(string sensorName, float? value)
+	public FakeHardwareSensorSource Set(SensorIdentifier sensor, float? value)
 	{
-		var sensor = _sensors.Single(entry => entry.SensorName == sensorName);
-		sensor.Value = value;
+		var index = _entries.FindIndex(entry => entry.Sensor == sensor);
+		if (index < 0)
+		{
+			throw new InvalidOperationException($"No such sensor: {sensor.Id}.");
+		}
+
+		_entries[index] = new Entry(sensor, value);
 		return this;
 	}
 
@@ -72,37 +85,14 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 			? new HashSet<string>(hardwareFilter, StringComparer.Ordinal)
 			: null;
 
-		return _sensors
-			.Where(sensor => filter is null || filter.Contains(Root(sensor.HardwarePath)))
-			.Select(sensor => new HardwareSensor(
-				sensor.HardwarePath,
-				sensor.SensorName,
-				sensor.SensorType,
-				sensor.Value))
+		return _entries
+			.Where(entry => filter is null || filter.Contains(entry.Sensor.RootHardwareName))
+			.Select(entry => new HardwareSensor(entry.Sensor, entry.Value))
 			.ToArray();
 	}
 
 	/// <inheritdoc />
 	public void Dispose() => Close();
 
-	private static string Root(string hardwarePath)
-	{
-		var separator = hardwarePath.IndexOf('/', StringComparison.Ordinal);
-		return separator < 0 ? hardwarePath : hardwarePath[..separator];
-	}
-
-	private sealed class Sensor(
-		string hardwarePath,
-		string sensorName,
-		SensorType sensorType,
-		float? value)
-	{
-		public string HardwarePath { get; } = hardwarePath;
-
-		public string SensorName { get; } = sensorName;
-
-		public SensorType SensorType { get; } = sensorType;
-
-		public float? Value { get; set; } = value;
-	}
+	private sealed record Entry(SensorIdentifier Sensor, float? Value);
 }

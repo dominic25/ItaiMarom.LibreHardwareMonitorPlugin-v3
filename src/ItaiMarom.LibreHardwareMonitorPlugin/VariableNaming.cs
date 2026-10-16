@@ -84,6 +84,105 @@ public static partial class VariableNaming
 	public static bool IsValid(string? name) =>
 		!string.IsNullOrEmpty(name) && ValidName().IsMatch(name);
 
+	/// <summary>Longest declared local id the host accepts.</summary>
+	public const int MaxDeclaredIdLength = 64;
+
+	/// <summary>Longest resource local id the host accepts.</summary>
+	public const int MaxResourceIdLength = 256;
+
+	/// <summary>
+	/// Turns arbitrary text - a LibreHardwareMonitor identifier like <c>/lpc/nct6776f/0/temperature/1</c>,
+	/// or a sensor name - into a declared local id: lowercase, digits and single hyphens between them,
+	/// starting with a letter, at most <see cref="MaxDeclaredIdLength"/> characters.
+	/// </summary>
+	/// <remarks>
+	/// This is the id half of a variable, not its name, so it only has to be unique and stable; the
+	/// readable, backwards-compatible spelling lives on
+	/// <see cref="Hardware.SensorIdentifier.VariableName"/>. It is fed the hardware library's own sensor
+	/// identifier, which is the one piece of a sensor that stays the same when the user swaps a device of
+	/// the same kind and which distinguishes two of the same model.
+	/// </remarks>
+	public static string ToDeclaredId(string? source)
+	{
+		if (string.IsNullOrWhiteSpace(source))
+		{
+			return "v";
+		}
+
+		var builder = new StringBuilder(source.Length);
+		var pendingSeparator = false;
+		foreach (var character in source)
+		{
+			var isLetter = character is >= 'a' and <= 'z' or >= 'A' and <= 'Z';
+			if (!isLetter && character is not (>= '0' and <= '9'))
+			{
+				// Everything else - '/', ' ', '#', '-' - is a boundary between two segments.
+				pendingSeparator = true;
+				continue;
+			}
+
+			if (pendingSeparator && builder.Length > 0)
+			{
+				builder.Append('-');
+			}
+
+			pendingSeparator = false;
+			builder.Append(char.ToLowerInvariant(character));
+		}
+
+		var id = builder.ToString();
+		if (id.Length == 0)
+		{
+			return "v";
+		}
+
+		// A declared id has to start with a letter.
+		if (char.IsDigit(id[0]))
+		{
+			id = "v-" + id;
+		}
+
+		return id.Length > MaxDeclaredIdLength ? Trim(id, MaxDeclaredIdLength) : id;
+	}
+
+	/// <summary>
+	/// Turns any text into a legal catalog resource id: the same text with whitespace, control characters
+	/// and the reserved <c>::</c> separator replaced. Unlike a declared id this may contain anything else,
+	/// including '/', so a LibreHardwareMonitor identifier passes through readable.
+	/// </summary>
+	public static string ToResourceId(string? source)
+	{
+		if (string.IsNullOrWhiteSpace(source))
+		{
+			return "resource";
+		}
+
+		var builder = new StringBuilder(source.Length);
+		foreach (var character in source)
+		{
+			builder.Append(char.IsWhiteSpace(character) || char.IsControl(character) || character == ':'
+				? '-'
+				: character);
+		}
+
+		var id = builder.ToString();
+		return id.Length > MaxResourceIdLength ? id[..MaxResourceIdLength] : id;
+	}
+
+	/// <summary>Whether <paramref name="id"/> is a legal resource id for this plugin's catalog.</summary>
+	public static bool IsValidResourceId(string? id) =>
+		!string.IsNullOrEmpty(id)
+		&& id.Length <= MaxResourceIdLength
+		&& !id.Contains("::", StringComparison.Ordinal)
+		&& !id.Any(character => char.IsWhiteSpace(character) || char.IsControl(character));
+
+	/// <summary>Cuts to <paramref name="max"/> characters without leaving a trailing separator.</summary>
+	private static string Trim(string value, int max)
+	{
+		var trimmed = value[..max].TrimEnd('-');
+		return trimmed.Length == 0 ? "v" : trimmed;
+	}
+
 	[GeneratedRegex("_+", RegexOptions.CultureInvariant)]
 	private static partial Regex UnderscoreRuns();
 
