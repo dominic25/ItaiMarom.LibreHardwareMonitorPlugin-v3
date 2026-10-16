@@ -1,8 +1,10 @@
+using ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 using MacroDeck.Sdk;
 using MacroDeck.Sdk.Actions;
+using MacroDeck.Sdk.ConfigFlow;
 using MacroDeck.Sdk.Migration;
 using MacroDeck.Sdk.Variables;
 using Serilog;
@@ -21,11 +23,16 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin;
 /// the catalog, without anything being declared up front.
 /// </para>
 /// <para>
+/// Selecting which sensors those are is the settings screen the old plugin's configuration dialog became:
+/// see <see cref="LibreHardwareMonitorConfigFlow"/>. The integration owns the loop and the selection, and
+/// hands both to a fresh flow per session, so the screen reopens showing what is configured now.
+/// </para>
+/// <para>
 /// The provider does the work; this type exists to own the lifetime and to wire the two together, so the
 /// variable surface can be tested against a fake sensor source without a session.
 /// </para>
 /// </remarks>
-public sealed class LibreHardwareMonitorIntegration : IPluginIntegration, IMigrationProvider, IVariableProvider, IAsyncDisposable
+public sealed class LibreHardwareMonitorIntegration : IPluginIntegration, IMigrationProvider, IVariableProvider, IConfigFlowProvider, IAsyncDisposable
 {
 	private readonly HardwareMonitor _hardware;
 	private readonly SensorSelection _selection;
@@ -44,6 +51,18 @@ public sealed class LibreHardwareMonitorIntegration : IPluginIntegration, IMigra
 
 	/// <inheritdoc />
 	public IReadOnlyList<IIntegrationMigration> Migrations { get; }
+
+	/// <summary>
+	/// The settings screen: one list of sensors and one polling interval, so a second entry would have
+	/// nothing of its own to say.
+	/// </summary>
+	public bool AllowsMultipleConfigurations => false;
+
+	/// <summary>
+	/// A fresh flow per session, handed the live loop and selection so it opens on what is configured now
+	/// rather than on what was configured when the plugin started.
+	/// </summary>
+	public IConfigFlow CreateConfigFlow() => new LibreHardwareMonitorConfigFlow(_hardware, _selection, _logger);
 
 	/// <inheritdoc />
 	public IReadOnlyList<IActionDefinition> Actions { get; } = [];

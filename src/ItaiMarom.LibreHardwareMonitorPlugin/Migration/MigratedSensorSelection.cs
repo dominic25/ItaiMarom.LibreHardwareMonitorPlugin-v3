@@ -7,15 +7,17 @@ using Serilog;
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 
 /// <summary>
-/// What a Macro Deck 2 migration leaves behind: the sensors to declare as variables, and how often the
-/// old plugin was told to read them.
+/// The sensors the plugin is configured to declare as variables, and how often to read them: what a
+/// Macro Deck 2 migration leaves behind, and what the plugin's own settings screen stores.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The host's configuration entry is the only thing a migration can persist, so this is what the plugin
-/// writes into it and reads back out. One entry holds the whole selection: the thing being configured is
-/// one list, and splitting it across an entry per sensor would turn a single read at startup into a
-/// round trip per sensor.
+/// The host's configuration entry is the only thing that survives a restart, so this is what the plugin
+/// writes into it and reads back out. It has two writers - a migration taking over the old plugin's
+/// settings, and the settings screen the user fills in - and one reader, so both paths have to agree on
+/// the stored shape. One entry holds the whole selection: the thing being configured is one list, and
+/// splitting it across an entry per sensor would turn a single read at startup into a round trip per
+/// sensor.
 /// </para>
 /// <para>
 /// The list is stored as a JSON string inside a JSON value, which looks like one layer too many. It is
@@ -60,6 +62,18 @@ public sealed record MigratedSensorSelection(IReadOnlyList<SensorIdentifier> Sen
 
 		return values;
 	}
+
+	/// <summary>
+	/// The same selection as configuration values a flow completes with. A migration hands its values to
+	/// the host as JSON; a flow hands them over as the plain strings <see cref="ConfigFlowValue"/> can
+	/// carry, which is the one shape <see cref="IIntegrationConfig.GetStringAsync"/> is specified to give
+	/// back unchanged.
+	/// </summary>
+	public IReadOnlyDictionary<string, ConfigFlowValue> ToConfigurationValues() =>
+		ToValues().ToDictionary(
+			pair => pair.Key,
+			pair => ConfigFlowValue.Plain(pair.Value.GetString() ?? string.Empty),
+			StringComparer.Ordinal);
 
 	/// <summary>
 	/// Reads back every selection the host holds for this integration. Never throws: a configuration that

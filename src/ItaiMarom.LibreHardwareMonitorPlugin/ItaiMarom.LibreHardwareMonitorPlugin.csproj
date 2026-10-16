@@ -35,4 +35,12 @@
         <Content Include="Assets\icon.svg" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- The tests drive the settings flow through the same step and field names the plugin uses, so
+             a rename cannot leave the test asserting a contract that no longer exists. -->
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>ItaiMarom.LibreHardwareMonitorPlugin.Tests</_Parameter1>
+        </AssemblyAttribute>
+    </ItemGroup>
+
 </Project>
