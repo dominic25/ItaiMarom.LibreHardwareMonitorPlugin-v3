@@ -22,8 +22,13 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 public sealed class HardwareMonitor : IAsyncDisposable
 {
 	private readonly IHardwareSensorSource _source;
-	private readonly HardwareMonitorOptions _options;
 	private readonly ILogger _logger;
+
+	/// <summary>
+	/// How the loop is timed. Swapped rather than mutated, because the loop reads it between polls and
+	/// reads one snapshot per iteration.
+	/// </summary>
+	private HardwareMonitorOptions _options;
 
 	/// <summary>Serializes every call into the hardware library, which is not thread-safe.</summary>
 	private readonly SemaphoreSlim _hardwareGate = new(1, 1);
@@ -78,6 +83,21 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		}
 	}
 
+	/// <summary>How the loop is currently timed.</summary>
+	public HardwareMonitorOptions Options => Volatile.Read(ref _options);
+
+	/// <summary>
+	/// Replaces the loop's timing, for example with the polling rate a migrated configuration asks for.
+	/// Takes effect at the loop's next iteration rather than at its next start, and is safe to call
+	/// whether or not it is running.
+	/// </summary>
+	public void SetOptions(HardwareMonitorOptions options)
+	{
+		ArgumentNullException.ThrowIfNull(options);
+
+		Volatile.Write(ref _options, options.Normalized());
+	}
+
 	/// <summary>Starts the loop. Does nothing when it is already running.</summary>
 	public void Start()
 	{
@@ -97,7 +117,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 
 		_logger.Information(
 			"Hardware monitor started; polling every {PollingIntervalMs} ms.",
-			_options.PollingInterval.TotalMilliseconds);
+			Options.PollingInterval.TotalMilliseconds);
 	}
 
 	/// <summary>Stops the loop and releases the hardware. Does nothing when it is not running.</summary>
@@ -241,9 +261,13 @@ public sealed class HardwareMonitor : IAsyncDisposable
 
 			while (!cancellationToken.IsCancellationRequested)
 			{
+				// One snapshot per iteration, so the poll and the delay that follows it are timed by the
+				// same options even if a new configuration arrives in between.
+				var options = Options;
+
 				try
 				{
-					await PollOnceAsync(cancellationToken).ConfigureAwait(false);
+					await PollOnceAsync(options, cancellationToken).ConfigureAwait(false);
 				}
 				catch (OperationCanceledException)
 				{
@@ -256,7 +280,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 					_logger.Warning(exception, "A hardware poll failed; keeping the previous readings.");
 				}
 
-				await Task.Delay(_options.PollingInterval, cancellationToken).ConfigureAwait(false);
+				await Task.Delay(options.PollingInterval, cancellationToken).ConfigureAwait(false);
 			}
 		}
 		catch (OperationCanceledException)
@@ -269,7 +293,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		}
 	}
 
-	private async Task PollOnceAsync(CancellationToken cancellationToken)
+	private async Task PollOnceAsync(HardwareMonitorOptions options, CancellationToken cancellationToken)
 	{
 		SensorIdentifier[] watched;
 		lock (_sync)
@@ -316,7 +340,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 
 			// Past StaleAfter a reading is a claim about the past, and the value a variable reports is
 			// supposed to be about now.
-			var cutoff = sampledAt - _options.StaleAfter;
+			var cutoff = sampledAt - options.StaleAfter;
 			foreach (var key in _readings
 				.Where(pair => pair.Value.SampledAt < cutoff)
 				.Select(pair => pair.Key)

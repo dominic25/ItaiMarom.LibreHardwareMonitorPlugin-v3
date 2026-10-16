@@ -1,7 +1,9 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 using MacroDeck.Sdk;
 using MacroDeck.Sdk.Actions;
+using MacroDeck.Sdk.Migration;
 using MacroDeck.Sdk.Variables;
 using Serilog;
 
@@ -23,28 +25,27 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin;
 /// variable surface can be tested against a fake sensor source without a session.
 /// </para>
 /// </remarks>
-public sealed class LibreHardwareMonitorIntegration : IPluginIntegration, IVariableProvider, IAsyncDisposable
+public sealed class LibreHardwareMonitorIntegration : IPluginIntegration, IMigrationProvider, IVariableProvider, IAsyncDisposable
 {
 	private readonly HardwareMonitor _hardware;
 	private readonly SensorSelection _selection;
 	private readonly SensorVariableProvider _variables;
+	private readonly ILogger _logger;
 
-	// Built by DI, so anything the container knows can be taken here: the real sensor source, or a fake
-	// one a test registered in its place.
 	public LibreHardwareMonitorIntegration(ILogger logger, IHardwareSensorSource source, SensorSelection selection)
 	{
-		ArgumentNullException.ThrowIfNull(logger);
+		_logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
+		_hardware = new HardwareMonitor(source, HardwareMonitorOptions.Default, _logger);
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
-		_hardware = new HardwareMonitor(source, HardwareMonitorOptions.Default, logger);
-		_variables = new SensorVariableProvider(_hardware, _selection);
+		_variables = new SensorVariableProvider(_hardware, selection);
+		Migrations = [new MacroDeck2Migration(_hardware, _logger)];
 	}
 
 	/// <inheritdoc />
-	/// <remarks>
-	/// Empty on purpose: the Macro Deck 2 plugin had no actions, so this plugin has none either, and an
-	/// empty list is the honest description of that rather than a gap left to fill.
-	/// </remarks>
+	public IReadOnlyList<IIntegrationMigration> Migrations { get; }
+
+	/// <inheritdoc />
 	public IReadOnlyList<IActionDefinition> Actions { get; } = [];
 
 	/// <inheritdoc />
@@ -80,17 +81,27 @@ public sealed class LibreHardwareMonitorIntegration : IPluginIntegration, IVaria
 		_variables.DiscoverAsync(query, cancellationToken);
 
 	/// <summary>
-	/// Starts the hardware loop and tells it what to read. Runs once the session is established, and again
-	/// after a non-resume reconnect or a configuration change, so it is written to be safe to run on a
-	/// monitor that is already running.
+	/// Reads what a migration left behind, points the loop at those sensors and starts it. Runs once the
+	/// session is established, and again after a non-resume reconnect or a configuration change, so it is
+	/// written to be safe to run on a monitor that is already running.
 	/// </summary>
-	public Task InitializeAsync(IIntegrationContext context)
+	public async Task InitializeAsync(IIntegrationContext context)
 	{
+		ArgumentNullException.ThrowIfNull(context);
+
+		// What the host holds is the whole of what this plugin is configured with, so it is read on every
+		// initialize rather than cached: an entry the user removed has to stop being a variable.
+		var migrated = await MigratedSensorSelection
+			.ReadAsync(context.Config, _logger, CancellationToken.None)
+			.ConfigureAwait(false);
+
+		_selection.Replace(migrated.Sensors);
+		_hardware.SetOptions(PollingOptions(migrated.PollingInterval));
+
 		// The eager variables are the ones the host reads directly, without ever subscribing, so they are
 		// the working set until a binding narrows or widens it.
 		_hardware.SetWatchedSensors(_selection.Sensors);
 		_hardware.Start();
-		return Task.CompletedTask;
 	}
 
 	/// <summary>
@@ -105,4 +116,12 @@ public sealed class LibreHardwareMonitorIntegration : IPluginIntegration, IVaria
 		_variables.Dispose();
 		await _hardware.DisposeAsync().ConfigureAwait(false);
 	}
+
+	/// <summary>
+	/// The plugin's timing with a migrated Macro Deck 2 polling rate applied. The monitor clamps it.
+	/// </summary>
+	private static HardwareMonitorOptions PollingOptions(TimeSpan? pollingInterval) =>
+		pollingInterval is { } interval
+			? HardwareMonitorOptions.Default with { PollingInterval = interval }
+			: HardwareMonitorOptions.Default;
 }

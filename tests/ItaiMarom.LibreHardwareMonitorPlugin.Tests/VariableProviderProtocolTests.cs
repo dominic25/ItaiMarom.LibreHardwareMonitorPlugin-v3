@@ -25,9 +25,12 @@ public sealed class VariableProviderProtocolTests
 	{
 		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
 		var cpu = source.Sensors[0];
-		var selection = Select(cpu);
 
-		await using var harness = CreateHarness(source, selection);
+		await using var harness = CreateHarness(source);
+
+		// What the plugin declares after initialization comes from the configuration the migration writes,
+		// so the test goes through it rather than handing the integration a selection directly.
+		MigrationTestData.SeedMigratedSensors(harness.Context.Config, cpu);
 		await harness.InitializeIntegrationsAsync();
 
 		var described = (await harness.Variables.DescribeAsync()).DataAs<VariableCatalogPayload>();
@@ -64,9 +67,8 @@ public sealed class VariableProviderProtocolTests
 			.Add("CPU", "CPU Total", SensorType.Load, 42f);
 		var boardFan = TestSensor.Create("Motherboard", "Fan #1", SensorType.Fan, subHardwareName: "ITE IT8688E");
 		source.Add(boardFan, 1200f);
-		var selection = Select(source.Sensors[0]);
 
-		await using var harness = CreateHarness(source, selection);
+		await using var harness = CreateHarness(source);
 		await harness.InitializeIntegrationsAsync();
 
 		var roots = (await harness.Variables.DiscoverAsync()).DataAs<VariableCatalogPageResult>();
@@ -113,9 +115,8 @@ public sealed class VariableProviderProtocolTests
 			.Add("CPU", "CPU Total", SensorType.Load, 42f)
 			.Add("GPU", "GPU Core", SensorType.Temperature, 60f);
 		var gpu = source.Sensors[1];
-		var selection = Select(source.Sensors[0]);
 
-		await using var harness = CreateHarness(source, selection);
+		await using var harness = CreateHarness(source);
 		await harness.InitializeIntegrationsAsync();
 
 		// The catalog was never walked, so the plugin has never heard of this resource. An eager variable
@@ -130,12 +131,10 @@ public sealed class VariableProviderProtocolTests
 	[Test]
 	public async Task An_id_that_is_not_a_resource_id_resolves_to_nothing()
 	{
-		var selection = new SensorSelection();
-
-		await using var harness = CreateHarness(new FakeHardwareSensorSource(), selection);
+		await using var harness = CreateHarness(new FakeHardwareSensorSource());
 		await harness.InitializeIntegrationsAsync();
 
-		// A plugin with nothing selected declares nothing, and the host still has to be able to ask it
+		// A plugin with nothing configured declares nothing, and the host still has to be able to ask it
 		// whether it owns an id - and to be told "no" rather than "yes, but there is no value".
 		var outcome = await harness.Variables.ResolveAsync("a::b");
 
@@ -143,19 +142,12 @@ public sealed class VariableProviderProtocolTests
 		Assert.That(outcome.DataAs<VariableResolveResult>()?.Definition, Is.Null);
 	}
 
-	private static SensorSelection Select(params SensorIdentifier[] sensors)
-	{
-		var selection = new SensorSelection();
-		selection.Replace(sensors);
-		return selection;
-	}
-
-	private static PluginTestHarness CreateHarness(FakeHardwareSensorSource source, SensorSelection selection) =>
+	private static PluginTestHarness CreateHarness(FakeHardwareSensorSource source) =>
 		PluginTestHarness.Create(builder => builder
 			.ConfigureServices((_, services) =>
 			{
 				services.AddSingleton<IHardwareSensorSource>(source);
-				services.AddSingleton(selection);
+				services.AddSingleton<SensorSelection>();
 			})
 			.RegisterIntegration<LibreHardwareMonitorIntegration>());
 

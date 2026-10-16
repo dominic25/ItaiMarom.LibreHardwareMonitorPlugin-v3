@@ -59,14 +59,16 @@ public sealed class IntegrationSmokeTests
 	{
 		using var logger = new LoggerConfiguration().CreateLogger();
 		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
-		var selection = new SensorSelection();
-		selection.Replace([source.Sensors[0]]);
-		await using var integration = new LibreHardwareMonitorIntegration(logger, source, selection);
+		await using var integration = new LibreHardwareMonitorIntegration(
+			logger,
+			source,
+			new SensorSelection());
 
 		// The host initializes an integration again after a non-resume reconnect, and stops it before doing
 		// so. Having been initialized before must not stand in the way of that, and stopping twice must not
 		// close the hardware twice.
 		var context = new FakeIntegrationContext();
+		MigrationTestData.SeedMigratedSensors(context.Config, source.Sensors[0]);
 
 		await integration.InitializeAsync(context);
 		await integration.InitializeAsync(context);

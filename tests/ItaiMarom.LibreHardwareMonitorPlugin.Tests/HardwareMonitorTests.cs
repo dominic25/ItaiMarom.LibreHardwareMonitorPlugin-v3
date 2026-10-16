@@ -80,6 +80,27 @@ public sealed class HardwareMonitorTests
 	}
 
 	[Test]
+	public async Task Replacing_the_options_is_how_a_migrated_polling_rate_takes_effect()
+	{
+		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
+		using var logger = new LoggerConfiguration().CreateLogger();
+		await using var monitor = new HardwareMonitor(source, FastOptions, logger);
+
+		Assert.That(monitor.Options.PollingInterval, Is.EqualTo(FastOptions.PollingInterval));
+
+		monitor.SetOptions(HardwareMonitorOptions.Default with { PollingInterval = TimeSpan.FromMilliseconds(2500) });
+		Assert.That(monitor.Options.PollingInterval, Is.EqualTo(TimeSpan.FromMilliseconds(2500)));
+
+		// A stored rate that makes no sense is clamped rather than obeyed, so a settings file someone
+		// edited by hand cannot leave the plugin polling flat out or barely at all.
+		monitor.SetOptions(HardwareMonitorOptions.Default with { PollingInterval = TimeSpan.FromMilliseconds(1) });
+		Assert.That(monitor.Options.PollingInterval, Is.EqualTo(HardwareMonitorOptions.MinimumPollingInterval));
+
+		monitor.SetOptions(HardwareMonitorOptions.Default with { PollingInterval = TimeSpan.FromMinutes(10) });
+		Assert.That(monitor.Options.PollingInterval, Is.EqualTo(HardwareMonitorOptions.MaximumPollingInterval));
+	}
+
+	[Test]
 	public async Task A_sensor_that_is_not_watched_is_never_cached()
 	{
 		var source = new FakeHardwareSensorSource()

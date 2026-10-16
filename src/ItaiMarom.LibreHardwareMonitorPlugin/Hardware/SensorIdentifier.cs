@@ -31,6 +31,20 @@ public sealed record SensorIdentifier(
 		new("[^A-Za-z0-9]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
 	/// <summary>
+	/// Reduces any text to the shape Macro Deck 2 used for a variable name: every character outside
+	/// <c>[A-Za-z0-9]</c> becomes an underscore and the result is lowercased.
+	/// </summary>
+	/// <remarks>
+	/// Public because the Macro Deck 2 migration has to reduce a token it read out of a foreign settings
+	/// file the same way, and a second copy of this rule is a second thing that can drift.
+	/// </remarks>
+	public static string ToLegacyName(string text)
+	{
+		ArgumentNullException.ThrowIfNull(text);
+		return LegacyUnsafeCharacters.Replace(text, "_").ToLowerInvariant();
+	}
+
+	/// <summary>
 	/// The token the Macro Deck 2 plugin stored in its <c>requestedSensors</c> configuration, and the
 	/// text its variable names were built from: <c>{SensorName}_{SensorType}</c>.
 	/// </summary>
@@ -67,8 +81,7 @@ public sealed record SensorIdentifier(
 	/// into a dotless "ı". This uses the invariant culture instead: a name is derived once and then has to
 	/// mean the same thing on every machine that reads a shared button layout.
 	/// </remarks>
-	public string LegacyVariableName =>
-		LegacyUnsafeCharacters.Replace(LegacyToken, "_").ToLowerInvariant();
+	public string LegacyVariableName => ToLegacyName(LegacyToken);
 
 	/// <summary>
 	/// The canonical Macro Deck 3 variable name for this sensor: the legacy name where the host still

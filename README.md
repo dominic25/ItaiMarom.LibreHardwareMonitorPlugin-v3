@@ -41,6 +41,12 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     SensorVariableNaming.cs            collision policy for names and declared ids
     SensorCatalogTable.cs              the hardware tree flattened for browsing
     SensorVariableProvider.cs          the IVariableProvider: reads, catalog, subscriptions
+  Migration/
+    LegacySensorRequest.cs             one line of the old plugin's requestedSensors setting
+    LegacySensorSelection.cs           turns a request into the sensors the machine has now
+    MacroDeck2Migration.cs             the IIntegrationMigration that claims the old settings
+    MigratedSensor.cs                  one sensor as the host configuration stores it
+    MigratedSensorSelection.cs         reads the migrated selection back at startup
   manifest.json                        plugin identity, icon, entrypoints
   macrodeck-build.json                 per-RID publish recipe used by the CLI
   Assets/icon.svg                      plugin icon
@@ -91,6 +97,32 @@ A few decisions worth knowing about:
   precision is kept and `DecimalPlaces` reproduces the rendered text the old plugin showed.
 
 
+## How the Macro Deck 2 migration works
+
+Macro Deck 2 asked the user to build the sensor list themselves, and a layout refers to one by name, so a
+port that ignored those settings would leave an upgraded layout with buttons that resolve to nothing. The
+integration implements `IIntegrationMigration` for `MigrationSource.MacroDeck2` and claims the old plugin's
+settings file:
+
+- The old plugin declared no actions, so `ClaimedActionSources` is empty and `MigrateActionAsync` answers
+  `null` for everything. A button belonging to another plugin is never touched.
+- `requestedSensors` is a list of `(hardware, type, sensor)` triples, and the third element is a *display*
+  name, not an identifier - so it is matched, not looked up. The token, reduced the way the old plugin
+  reduced it, must be equal, and the recorded hardware must be the one the sensor sits under. Every match
+  of every request is taken, because that is what the old plugin did: a machine with two identical disks
+  published both.
+- The match happens once, at migration time, and it is the *resolved identity* that is stored - the
+  sensor's library id and name, its kind, and its place in the hardware tree. A display name would have to
+  be matched again at every start, and matching means enumerating the machine's buses before the plugin can
+  say what it has, which is exactly the thing the polling loop exists to keep off the session's thread.
+- The old `pollingRate` is carried across and clamped to the loop's own bounds.
+- The result is one configuration entry, `Macro Deck 2 sensors`: a `sensors` value holding the JSON list,
+  and a `polling_rate` value. It carries no secrets and is not meant to be edited - the integration reads
+  it on every initialize, so what it holds *is* the eager variable set.
+
+A sensor that is no longer present simply does not come back, which is what happened to it in Macro Deck 2
+too.
+
 ## Build
 
 ```powershell
@@ -128,8 +160,12 @@ Step-by-step port from the Macro Deck 2 plugin:
 - [x] Repository and project scaffolding
 - [x] Hardware polling (out-of-process lifecycle)
 - [x] Variable surface (declared variables + browsable catalog)
-- [ ] Configuration
-- [ ] Macro Deck 2 settings migration
+- [x] Macro Deck 2 settings migration
+- [x] Actions - none, because the Macro Deck 2 plugin had none either; `Actions` is deliberately empty
+      and the integration is a variable provider and nothing more.
+- n/a Configuration - there is no plugin-side chooser to port. The old plugin had the user add a sensor
+      from its settings page; here a sensor is picked through the host's own variable browser, which the
+      catalog feeds, and the migration turns the old answer into a selection directly.
 
 ## License
 
