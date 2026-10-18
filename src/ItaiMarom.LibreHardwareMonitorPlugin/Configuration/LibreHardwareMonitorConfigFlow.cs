@@ -131,7 +131,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 				MinimumPollingMilliseconds,
 				MaximumPollingMilliseconds,
 				oauth.RedirectUri,
-				oauth.State));
+				oauth.State,
+				_hardware.AccessNote));
 
 			_logger.Information(
 				"The classic sensor window was opened on {SensorCount} sensors at {WindowUri}.",

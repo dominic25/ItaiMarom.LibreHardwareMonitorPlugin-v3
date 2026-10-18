@@ -19,6 +19,14 @@ that shape.
 - .NET SDK 10.0
 - Macro Deck 3 (prerelease)
 
+Some readings are taken through a kernel driver rather than through Windows: processor temperatures and
+clocks, a motherboard's fan speeds and voltages, and a drive's health. The hardware library asks for
+[PawnIO](https://pawnio.eu), which has to be installed on the machine, and Windows only opens it for an
+administrator - so **start Macro Deck as an administrator** if you expect those readings. Everything else
+is published either way, and the sensor window says a line about it under its heading when they are out of
+reach. (The driver the Macro Deck 2 plugin's library version used let any process read the machine, which
+is why the same sensor could work there and be missing here.)
+
 ```
 Directory.Build.props                  shared MSBuild settings (net10.0)
 Directory.Packages.props               central, pinned package versions
@@ -31,6 +39,7 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     LibreHardwareMonitorSource.cs      the real LibreHardwareMonitor Computer
     HardwareMonitor.cs                 the background polling loop and its reading cache
     HardwareMonitorOptions.cs          polling interval and staleness
+    KernelAccess.cs                    why the driver-only readings are missing, in a sentence
     HardwareLocation.cs                where a sensor sits in the hardware tree
     SensorIdentifier.cs                stable sensor identity and variable naming
     SensorFormatting.cs                how a reading is presented (decimals, unit, semantic kind)
@@ -144,7 +153,11 @@ so the settings screen is the old dialog itself, served to the browser:
   additions, for machines that report a few hundred sensors.
 - The tree also lists the sensors of sub-devices, which the old dialog could not see: a motherboard's
   super-I/O chip is where the voltages and the fan speeds live, and those sensors are still that
-  motherboard's third-level leaves rather than a level of their own.
+  motherboard's third-level leaves rather than a level of their own. (Each device's own `Update` is a
+  no-op for what it owns, so the plugin walks the whole tree to refresh them.)
+- When the readings that need the hardware library's kernel driver are out of reach - it is not installed,
+  or Macro Deck is not running as an administrator - the window says so in a line under its heading, and
+  the log says the same thing at the moment the hardware is opened.
 - The window opens on the configuration the plugin is already running with, so reopening it and pressing
   Save cannot lose a pick, and unticking everything is how the old dialog's "delete all variables" button
   is reached.

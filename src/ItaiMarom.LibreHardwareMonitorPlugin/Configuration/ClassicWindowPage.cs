@@ -34,6 +34,7 @@ internal static class ClassicWindowPage
 {
 	private const string ActionMarker = "__ACTION__";
 	private const string TitleMarker = "__TITLE__";
+	private const string NoticeMarker = "__NOTICE__";
 	private const string TreeMarker = "__TREE__";
 	private const string PollingMarker = "__POLLING__";
 	private const string PollingMinimumMarker = "__POLLING_MIN__";
@@ -77,6 +78,11 @@ internal static class ClassicWindowPage
 		header { padding: 18px 22px 12px; border-bottom: 1px solid var(--line); }
 		h1 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
 		header p { margin: 0; color: var(--dim); max-width: 78ch; }
+		p.notice {
+			margin: 10px 0 0; padding: 9px 12px; max-width: 78ch;
+			border-left: 3px solid #d9a13b; border-radius: 0 6px 6px 0;
+			background: #2a2417; color: #f0dcae;
+		}
 		.toolbar {
 			display: flex; align-items: center; gap: 12px;
 			padding: 12px 22px; background: var(--panel); border-bottom: 1px solid var(--line);
@@ -135,6 +141,7 @@ internal static class ClassicWindowPage
 			<header>
 				<h1>__TITLE__</h1>
 				<p>Tick the sensors to publish as Macro Deck variables. Anything you leave out stays reachable from the variable catalog, and the variable names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working.</p>
+		__NOTICE__
 			</header>
 
 			<div class="toolbar">
@@ -257,11 +264,22 @@ internal static class ClassicWindowPage
 		return Template
 			.Replace(ActionMarker, $"/?s={WebUtility.UrlEncode(key)}", StringComparison.Ordinal)
 			.Replace(TitleMarker, WebUtility.HtmlEncode(opening.Title), StringComparison.Ordinal)
+			.Replace(NoticeMarker, RenderNotice(opening.Notice), StringComparison.Ordinal)
 			.Replace(TreeMarker, RenderTree(opening), StringComparison.Ordinal)
 			.Replace(PollingMinimumMarker, Milliseconds(opening.MinimumPollingMilliseconds), StringComparison.Ordinal)
 			.Replace(PollingMaximumMarker, Milliseconds(opening.MaximumPollingMilliseconds), StringComparison.Ordinal)
 			.Replace(PollingMarker, Milliseconds(opening.PollingMilliseconds), StringComparison.Ordinal);
 	}
+
+	/// <summary>
+	/// The one thing that is wrong with the machine rather than with the selection, put under the heading:
+	/// readings the hardware library's kernel driver would have produced and this process cannot reach.
+	/// Nothing at all when there is nothing to say, which is the usual case.
+	/// </summary>
+	private static string RenderNotice(string? notice) =>
+		string.IsNullOrWhiteSpace(notice)
+			? string.Empty
+			: $"\t\t\t<p class=\"notice\">{WebUtility.HtmlEncode(notice)}</p>";
 
 	/// <summary>
 	/// The tree: one branch per hardware, one branch per reading kind inside it, and a tick box per

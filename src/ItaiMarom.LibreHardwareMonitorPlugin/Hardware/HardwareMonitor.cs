@@ -44,6 +44,12 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	private bool _isOpen;
 	private bool _disposed;
 
+	/// <summary>
+	/// What to tell the user about the readings this process cannot reach, or null when there is nothing
+	/// to say. Worked out when the hardware is opened, which is the first moment the driver is reached.
+	/// </summary>
+	private string? _accessNote;
+
 	public HardwareMonitor(IHardwareSensorSource source, HardwareMonitorOptions options, ILogger logger)
 	{
 		_source = source ?? throw new ArgumentNullException(nameof(source));
@@ -85,6 +91,13 @@ public sealed class HardwareMonitor : IAsyncDisposable
 
 	/// <summary>How the loop is currently timed.</summary>
 	public HardwareMonitorOptions Options => Volatile.Read(ref _options);
+
+	/// <summary>
+	/// What to tell the user about the readings this process cannot reach, or null when there is nothing
+	/// to say. It is something to put beside the sensors rather than a failure of its own: everything
+	/// that does not go through the hardware library's kernel driver still reads.
+	/// </summary>
+	public string? AccessNote => Volatile.Read(ref _accessNote);
 
 	/// <summary>
 	/// Replaces the loop's timing, for example with the polling rate a migrated configuration asks for.
@@ -360,6 +373,17 @@ public sealed class HardwareMonitor : IAsyncDisposable
 
 		_source.Open();
 		_isOpen = true;
+
+		// Asked once per open, because the answer is about this machine and this process. It goes to the
+		// log as well as to the window: the readings it names are absent rather than stale, and nothing
+		// else in the plugin can tell the difference.
+		var note = KernelAccess.Describe();
+		Volatile.Write(ref _accessNote, note);
+
+		if (note is not null)
+		{
+			_logger.Warning("{AccessNote}", note);
+		}
 	}
 
 	/// <summary>One cached value and the moment the poll that produced it finished.</summary>

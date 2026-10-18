@@ -20,7 +20,8 @@ internal sealed record ClassicWindowOpening(
 	double MinimumPollingMilliseconds,
 	double MaximumPollingMilliseconds,
 	string RedirectUri,
-	string State);
+	string State,
+	string? Notice = null);
 
 /// <summary>What the classic sensor window sent back when the user pressed Save.</summary>
 internal sealed record ClassicWindowPayload(IReadOnlyList<string> ResourceIds, double? PollingMilliseconds);

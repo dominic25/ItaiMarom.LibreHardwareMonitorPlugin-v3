@@ -45,9 +45,11 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 				continue;
 			}
 
-			// IHardware.Update walks into the sub-hardware itself, which is where a motherboard's
-			// super-I/O sensors live - the ones the old plugin never listed.
-			hardware.Update();
+			// A device does not update what it owns. The motherboard's own Update is a documented no-op -
+			// its super-I/O chip is a piece of hardware of its own, and that is where the fans and the
+			// voltages are read - so the whole tree is walked. The old plugin did the same with a visitor;
+			// it just never listed what it found down there.
+			Update(hardware);
 			Collect(hardware, HardwareLocation.Root(hardware.Identifier.ToString(), hardware.Name), sensors);
 		}
 
@@ -56,6 +58,17 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 
 	/// <inheritdoc />
 	public void Dispose() => _computer.Close();
+
+	/// <summary>Updates one piece of hardware and everything below it, because it does not do that itself.</summary>
+	private static void Update(IHardware hardware)
+	{
+		hardware.Update();
+
+		foreach (var subHardware in hardware.SubHardware)
+		{
+			Update(subHardware);
+		}
+	}
 
 	private static void Collect(IHardware hardware, HardwareLocation location, List<HardwareSensor> into)
 	{

@@ -172,7 +172,34 @@ public sealed class ClassicWindowServerTests
 	public void A_key_no_window_ever_used_holds_no_selection() =>
 		Assert.That(_server.TryTakePayload(new string('0', 32), out _), Is.False);
 
+	[Test]
+	public async Task A_window_says_which_readings_the_driver_could_not_produce()
+	{
+		var note = "Fan speeds <and> voltages need a driver Windows only lets an administrator open.";
+
+		var page = await WindowClient.ReadPageAsync(OpenWithNotice(note, [CpuCore1], CpuCore1).PageUri);
+
+		Assert.That(page, Does.Contain("<p class=\"notice\">"));
+		Assert.That(page, Does.Contain("Fan speeds &lt;and&gt; voltages need a driver"));
+		Assert.That(page, Does.Not.Contain("<and>"));
+		Assert.That(page, Does.Not.Contain("__"));
+	}
+
+	[Test]
+	public async Task A_window_with_nothing_to_report_carries_no_notice()
+	{
+		var page = await WindowClient.ReadPageAsync(Open([CpuCore1], CpuCore1).PageUri);
+
+		Assert.That(page, Does.Not.Contain("class=\"notice\""));
+	}
+
 	private ClassicWindowServer.Opened Open(
+		IReadOnlyCollection<SensorIdentifier> reported,
+		params SensorIdentifier[] selected) =>
+		OpenWithNotice(null, reported, selected);
+
+	private ClassicWindowServer.Opened OpenWithNotice(
+		string? notice,
 		IReadOnlyCollection<SensorIdentifier> reported,
 		params SensorIdentifier[] selected) =>
 		_server.Open(new ClassicWindowOpening(
@@ -183,7 +210,8 @@ public sealed class ClassicWindowServerTests
 			10,
 			10000,
 			RedirectUri,
-			State));
+			State,
+			notice));
 
 	private static int Occurrences(string text, string value)
 	{
