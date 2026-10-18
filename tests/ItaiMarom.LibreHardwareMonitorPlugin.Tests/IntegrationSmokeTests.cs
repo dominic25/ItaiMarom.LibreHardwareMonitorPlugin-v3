@@ -21,7 +21,8 @@ public sealed class IntegrationSmokeTests
 		await using var integration = new LibreHardwareMonitorIntegration(
 			logger,
 			new FakeHardwareSensorSource(),
-			new SensorSelection());
+			new SensorSelection(),
+			new RecordingCatalogNotifier());
 
 		// The Macro Deck 2 plugin had no actions either: it only ever produced variables. Declaring the
 		// same shape here means upgrading cannot silently lose or invent a button action.
@@ -34,7 +35,11 @@ public sealed class IntegrationSmokeTests
 		using var logger = new LoggerConfiguration().CreateLogger();
 		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
 		var selection = new SensorSelection();
-		await using var integration = new LibreHardwareMonitorIntegration(logger, source, selection);
+		await using var integration = new LibreHardwareMonitorIntegration(
+			logger,
+			source,
+			selection,
+			new RecordingCatalogNotifier());
 
 		// The host asks a registered-but-not-yet-initialized integration what it has, so this has to answer
 		// without touching the hardware.
@@ -59,10 +64,12 @@ public sealed class IntegrationSmokeTests
 	{
 		using var logger = new LoggerConfiguration().CreateLogger();
 		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
+		var notifier = new RecordingCatalogNotifier();
 		await using var integration = new LibreHardwareMonitorIntegration(
 			logger,
 			source,
-			new SensorSelection());
+			new SensorSelection(),
+			notifier);
 
 		// The host initializes an integration again after a non-resume reconnect, and stops it before doing
 		// so. Having been initialized before must not stand in the way of that, and stopping twice must not
@@ -77,5 +84,12 @@ public sealed class IntegrationSmokeTests
 
 		Assert.That(source.OpenCount, Is.EqualTo(1));
 		Assert.That(source.CloseCount, Is.EqualTo(1));
+
+		// The host only learns what a saved configuration changed by being told: it describes the plugin
+		// once and never asks again on its own, so an initialize that does not announce leaves the new
+		// selection out of the variable surface until the next reconnect.
+		Assert.That(notifier.Announcements, Is.Not.Empty);
+		Assert.That(notifier.Announcements, Has.All.Matches<(string Kind, string? LocalId, string? Reason)>(
+			a => a.Kind == "variables"));
 	}
 }

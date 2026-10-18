@@ -47,6 +47,11 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     MacroDeck2Migration.cs             the IIntegrationMigration that claims the old settings
     MigratedSensor.cs                  one sensor as the host configuration stores it
     MigratedSensorSelection.cs         reads the migrated selection back at startup
+  Configuration/
+    LibreHardwareMonitorConfigFlow.cs  the settings screen: the step that opens the classic window
+    ClassicWindowServer.cs             the loopback server the window runs on, and its one-shot payloads
+    ClassicWindowPage.cs               the old dialog, rendered server-side
+    SensorCategory.cs                  the window's tree: hardware, reading kind, sensors
   manifest.json                        plugin identity, icon, entrypoints
   macrodeck-build.json                 per-RID publish recipe used by the CLI
   Assets/icon.svg                      plugin icon
@@ -61,7 +66,7 @@ a SMART query, so it is never touched from anything that serves the Macro Deck s
 
 - `HardwareMonitor` runs one background loop. It is the only caller of `IHardwareSensorSource`, and
   `SemaphoreSlim` serialises that caller against the two other places hardware is touched (opening, and
-  reading the whole tree for the sensor picker).
+  reading the whole tree for the sensor window).
 - Each poll writes into an in-memory dictionary of the newest reading per watched sensor.
 - Readers - the variable provider - take the dictionary's current value. There is no `await` between a
   Macro Deck request and its answer, and no lock is ever held across a call into the hardware library.
@@ -123,6 +128,33 @@ settings file:
 A sensor that is no longer present simply does not come back, which is what happened to it in Macro Deck 2
 too.
 
+## How the settings screen works
+
+Macro Deck 3 has no tree control among the fields a plugin may declare, and what is being ported is a tree,
+so the settings screen is the old dialog itself, served to the browser:
+
+- The screen declares no fields at all. Its one button opens a page the plugin serves on a loopback port,
+  and that page *is* the configuration dialog: the hardware, then the reading kind, then the sensor, with
+  the polling rate under it. A flattened form of grouped multi-selects standing in for the tree was tried
+  and removed: it is not the dialog that was asked for, and the tree is the point of it.
+- The tree is the old one node for node. The reading kind is named the way the hardware library names it
+  (`SmallData`, not `Small Data`), each sensor is labelled the way the old plugin labelled it
+  (`CPU Core #1_Temperature` - the text its variable names were built from), and both levels keep the
+  library's own order rather than a sorted one. A filter box and a count on each branch are the only
+  additions, for machines that report a few hundred sensors.
+- The tree also lists the sensors of sub-devices, which the old dialog could not see: a motherboard's
+  super-I/O chip is where the voltages and the fan speeds live, and those sensors are still that
+  motherboard's third-level leaves rather than a level of their own.
+- The window opens on the configuration the plugin is already running with, so reopening it and pressing
+  Save cannot lose a pick, and unticking everything is how the old dialog's "delete all variables" button
+  is reached.
+- Saving posts the ticked sensors to the plugin, and the plugin sends the browser on to the host's OAuth
+  callback carrying nothing but a key. The callback is a `GET` whose request line the host caps at 8 KB, so
+  the selection travels in the POST: the address only ever says "this window finished".
+- What it stores is the shape a migration writes - one entry, a `sensors` value and a `polling_rate` value
+  - so the settings screen and the migration are two writers of one document, and a selection survives
+  being reconfigured as well as it survives being upgraded.
+
 ## Build
 
 ```powershell
@@ -163,9 +195,8 @@ Step-by-step port from the Macro Deck 2 plugin:
 - [x] Macro Deck 2 settings migration
 - [x] Actions - none, because the Macro Deck 2 plugin had none either; `Actions` is deliberately empty
       and the integration is a variable provider and nothing more.
-- n/a Configuration - there is no plugin-side chooser to port. The old plugin had the user add a sensor
-      from its settings page; here a sensor is picked through the host's own variable browser, which the
-      catalog feeds, and the migration turns the old answer into a selection directly.
+- [x] Settings screen - the Macro Deck 2 configuration dialog, carried over as the checkbox tree it always
+      was, opened in the browser from a step whose only job is that button.
 
 ## License
 
