@@ -13,10 +13,11 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 /// <remarks>
 /// <para>
 /// The screen opens straight onto that dialog. Its one button hands the browser a page serving the old
-/// checkbox tree - hardware, then reading kind, then sensor, with the polling-rate control under it - and
-/// what the user ticks there is what the host stores. There is no chooser of the plugin's own in front of
-/// it: Macro Deck 3 has no tree control in its declared fields, and a flat form of grouped multi-selects
-/// standing in for the tree is not the dialog that was ported.
+/// checkbox tree - hardware, then reading kind, then sensor, with the polling-rate control under it, and
+/// each sensor carrying the reading it is reporting right now - and what the user ticks there is what the
+/// host stores. There is no chooser of the plugin's own in front of it: Macro Deck 3 has no tree control
+/// in its declared fields, and a flat form of grouped multi-selects standing in for the tree is not the
+/// dialog that was ported.
 /// </para>
 /// <para>
 /// The window comes back through the host's OAuth callback, which is the only door into a flow that has
@@ -121,6 +122,11 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		try
 		{
 			var index = _sensors ??= await IndexAsync(cancellationToken).ConfigureAwait(false);
+
+			// The tree comes from the index the session holds, so the ids it posts back stay resolvable
+			// even if a device came or went in the meantime; the readings are read now, because a window
+			// reopened inside one session would otherwise open on the values of half an hour ago.
+			var values = await ValuesAsync(cancellationToken).ConfigureAwait(false);
 			var oauth = context.OAuth;
 
 			var opened = _window.Open(new ClassicWindowOpening(
@@ -132,7 +138,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 				MaximumPollingMilliseconds,
 				oauth.RedirectUri,
 				oauth.State,
-				_hardware.AccessNote));
+				_hardware.AccessNote,
+				values));
 
 			_logger.Information(
 				"The classic sensor window was opened on {SensorCount} sensors at {WindowUri}.",
@@ -216,6 +223,30 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		Description = Strings.Configuration.Description(),
 		Fields = [],
 	};
+
+	/// <summary>
+	/// The reading of every sensor on the machine, for the window to open on. A machine that cannot be
+	/// read is not a reason to refuse to open the window: the tree still has to be shown, and what it
+	/// cannot say is a cell with no value in it, which is what the page shows for a sensor that has none.
+	/// </summary>
+	private async Task<IReadOnlyDictionary<string, string?>> ValuesAsync(CancellationToken cancellationToken)
+	{
+		try
+		{
+			return SensorReadingSource.ValuesOf(
+				await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false));
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (Exception exception)
+		{
+			_logger.Error(exception, "The hardware could not be read, so the sensor window opens without values.");
+
+			return new Dictionary<string, string?>(StringComparer.Ordinal);
+		}
+	}
 
 	/// <summary>
 	/// Every sensor the hardware reports, read once for the session. The tree the window is drawn from

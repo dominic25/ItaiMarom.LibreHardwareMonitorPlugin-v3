@@ -19,9 +19,10 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 /// </para>
 /// <para>
 /// The page is rendered here rather than built by the browser, which is what makes it work with no
-/// scripting at all: every sensor arrives as a real, already-ticked <c>input</c> and the form posts it
-/// back as it stands. Scripting only adds what a tree of tick boxes cannot be without it - a branch that
-/// ticks everything under it, a count, and a filter for a machine with a few hundred sensors.
+/// scripting at all: every sensor arrives as a real, already-ticked <c>input</c>, with the reading it is
+/// reporting at that moment beside it, and the form posts it back as it stands. Scripting only adds what
+/// a tree of tick boxes cannot be without it - a branch that ticks everything under it, a count, a filter
+/// for a machine with a few hundred sensors, and the refreshes that keep those readings live.
 /// </para>
 /// <para>
 /// The markup is a constant in this file rather than a page beside it. A page is a file the plugin
@@ -36,9 +37,14 @@ internal static class ClassicWindowPage
 	private const string TitleMarker = "__TITLE__";
 	private const string NoticeMarker = "__NOTICE__";
 	private const string TreeMarker = "__TREE__";
+	private const string ValuesMarker = "__VALUES__";
 	private const string PollingMarker = "__POLLING__";
 	private const string PollingMinimumMarker = "__POLLING_MIN__";
 	private const string PollingMaximumMarker = "__POLLING_MAX__";
+
+	/// <summary>What a window with no readings to show has: every cell renders as "no reading".</summary>
+	private static readonly IReadOnlyDictionary<string, string?> EmptyValues =
+		new Dictionary<string, string?>(StringComparer.Ordinal);
 
 	/// <summary>
 	/// The whole page but for what changes per window, which is everything a marker stands in for: the
@@ -66,6 +72,7 @@ internal static class ClassicWindowPage
 			--dim: #9aa1ad;
 			--accent: #4c8dff;
 			--accent-soft: #24375c;
+			--missing: #6f7783;
 		}
 		* { box-sizing: border-box; }
 		body {
@@ -92,7 +99,7 @@ internal static class ClassicWindowPage
 			background: var(--bg); color: var(--text); font: inherit;
 		}
 		#filter:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
-		#counts { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+		#counts, #updated { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 		.tree { flex: 1; overflow: auto; padding: 10px 12px 18px; }
 		details { border-radius: 6px; }
 		summary {
@@ -114,6 +121,9 @@ internal static class ClassicWindowPage
 		input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; flex: none; }
 		input[type="checkbox"]:indeterminate { opacity: .8; }
 		li label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		li label span:first-of-type { flex: 1; min-width: 0; }
+		li label .value { flex: none; color: var(--dim); font-variant-numeric: tabular-nums; }
+		li label .value.none { color: var(--missing); }
 		footer {
 			display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
 			padding: 14px 22px; background: var(--panel); border-top: 1px solid var(--line);
@@ -140,12 +150,13 @@ internal static class ClassicWindowPage
 		<form method="post" action="__ACTION__" autocomplete="off">
 			<header>
 				<h1>__TITLE__</h1>
-				<p>Tick the sensors to publish as Macro Deck variables. Anything you leave out stays reachable from the variable catalog, and the variable names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working.</p>
+				<p>Tick the sensors to publish as Macro Deck variables. Either way, every sensor shows what it is reporting right now, so a reading that never moves can be left alone. Anything you leave out stays reachable from the variable catalog, and the variable names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working.</p>
 		__NOTICE__
 			</header>
 
 			<div class="toolbar">
 				<input type="search" id="filter" placeholder="Filter sensors&hellip;" aria-label="Filter sensors">
+				<span id="updated"></span>
 				<span id="counts"></span>
 			</div>
 
@@ -250,6 +261,46 @@ internal static class ClassicWindowPage
 			applyPolling(polling.value);
 
 			syncAll();
+
+			// The readings are asked for once a second and written into the cell of the sensor they belong
+			// to. Only those cells are touched, so nothing the user has ticked, opened or typed moves under
+			// them, and a cell is never matched by position: it carries the sensor's resource id.
+			var cells = [].slice.call(tree.querySelectorAll("[data-value]"));
+			var updated = document.getElementById("updated");
+			var valuesUrl = "__VALUES__";
+
+			function refreshValues() {
+				if (document.hidden) return;
+
+				fetch(valuesUrl, { cache: "no-store" })
+					.then(function (response) { return response.ok ? response.json() : null; })
+					.then(function (values) {
+						if (!values) return;
+
+						for (var i = 0; i < cells.length; i++) {
+							var cell = cells[i];
+							var value = values[cell.getAttribute("data-value")];
+							var missing = value === null || value === undefined || value === "";
+							cell.textContent = missing ? "\u2014" : value;
+							cell.classList.toggle("none", missing);
+						}
+
+						if (updated) updated.textContent = "values updated " + new Date().toLocaleTimeString();
+					})
+					.catch(function () {
+						// Reading stopped - the plugin is closing, or this page is on its way out. The next
+						// tick asks again, and what is on screen is left as it was rather than blanked.
+						if (updated) updated.textContent = "live values unavailable";
+					});
+			}
+
+			// Everything the tree needs to be a working form is already done. The refresh is started last,
+			// and only where there is a fetch to make, so a page that cannot refresh is still a page whose
+			// ticks and counts work - with the readings it was drawn with.
+			if (typeof window.fetch === "function") {
+				refreshValues();
+				window.setInterval(refreshValues, 1000);
+			}
 		})();
 		</script>
 		</body>
@@ -266,6 +317,7 @@ internal static class ClassicWindowPage
 			.Replace(TitleMarker, WebUtility.HtmlEncode(opening.Title), StringComparison.Ordinal)
 			.Replace(NoticeMarker, RenderNotice(opening.Notice), StringComparison.Ordinal)
 			.Replace(TreeMarker, RenderTree(opening), StringComparison.Ordinal)
+			.Replace(ValuesMarker, $"/values?s={WebUtility.UrlEncode(key)}", StringComparison.Ordinal)
 			.Replace(PollingMinimumMarker, Milliseconds(opening.MinimumPollingMilliseconds), StringComparison.Ordinal)
 			.Replace(PollingMaximumMarker, Milliseconds(opening.MaximumPollingMilliseconds), StringComparison.Ordinal)
 			.Replace(PollingMarker, Milliseconds(opening.PollingMilliseconds), StringComparison.Ordinal);
@@ -274,12 +326,14 @@ internal static class ClassicWindowPage
 	/// <summary>
 	/// The one thing that is wrong with the machine rather than with the selection, put under the heading:
 	/// readings the hardware library's kernel driver would have produced and this process cannot reach.
-	/// Nothing at all when there is nothing to say, which is the usual case.
+	/// The sentence says why they are missing and what to do about it; the lead says that something is,
+	/// so the line reads as a warning rather than as small print. Nothing at all when there is nothing to
+	/// say, which is the usual case.
 	/// </summary>
 	private static string RenderNotice(string? notice) =>
 		string.IsNullOrWhiteSpace(notice)
 			? string.Empty
-			: $"\t\t\t<p class=\"notice\">{WebUtility.HtmlEncode(notice)}</p>";
+			: $"\t\t\t<p class=\"notice\"><strong>Some readings are missing.</strong> {WebUtility.HtmlEncode(notice)}</p>";
 
 	/// <summary>
 	/// The tree: one branch per hardware, one branch per reading kind inside it, and a tick box per
@@ -295,6 +349,7 @@ internal static class ClassicWindowPage
 		}
 
 		var selected = opening.SelectedResourceIds.ToHashSet(StringComparer.Ordinal);
+		var values = opening.Values ?? EmptyValues;
 		var builder = new StringBuilder();
 
 		foreach (var root in categories.GroupBy(category => category.RootName, StringComparer.Ordinal))
@@ -313,7 +368,7 @@ internal static class ClassicWindowPage
 				builder.Append("\t\t\t<ul>\n");
 				foreach (var sensor in category.Sensors)
 				{
-					AppendSensor(builder, sensor, selected.Contains(sensor.ResourceId));
+					AppendSensor(builder, sensor, selected.Contains(sensor.ResourceId), values);
 				}
 
 				builder.Append("\t\t\t</ul>\n\t\t</details>\n");
@@ -346,7 +401,11 @@ internal static class ClassicWindowPage
 	/// which is the text the old plugin also built its variable names from. The tick box carries the
 	/// identity, so this is what comes back from the window.
 	/// </summary>
-	private static void AppendSensor(StringBuilder builder, SensorIdentifier sensor, bool ticked)
+	private static void AppendSensor(
+		StringBuilder builder,
+		SensorIdentifier sensor,
+		bool ticked,
+		IReadOnlyDictionary<string, string?> values)
 	{
 		builder.Append("\t\t\t<li><label><input type=\"checkbox\" name=\"sensors\" value=\"")
 			.Append(WebUtility.HtmlEncode(sensor.ResourceId))
@@ -354,7 +413,29 @@ internal static class ClassicWindowPage
 			.Append(ticked ? " checked" : string.Empty)
 			.Append("><span>")
 			.Append(WebUtility.HtmlEncode(sensor.LegacyToken))
-			.Append("</span></label></li>\n");
+			.Append("</span>")
+			.Append(ValueCell(sensor, values))
+			.Append("</label></li>\n");
+	}
+
+	/// <summary>
+	/// The reading the sensor is reporting, in a cell the page keeps refreshing. The cell carries the
+	/// sensor's resource id rather than a position, so a reading cannot land beside the wrong sensor.
+	/// </summary>
+	private static string ValueCell(SensorIdentifier sensor, IReadOnlyDictionary<string, string?> values)
+	{
+		var value = values.GetValueOrDefault(sensor.ResourceId);
+		var missing = string.IsNullOrEmpty(value);
+
+		return new StringBuilder()
+			.Append("<span class=\"value")
+			.Append(missing ? " none" : string.Empty)
+			.Append("\" data-value=\"")
+			.Append(WebUtility.HtmlEncode(sensor.ResourceId))
+			.Append("\">")
+			.Append(missing ? "&mdash;" : WebUtility.HtmlEncode(value))
+			.Append("</span>")
+			.ToString();
 	}
 
 	private static string Milliseconds(double value) =>

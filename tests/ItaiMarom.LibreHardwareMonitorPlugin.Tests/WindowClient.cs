@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using NUnit.Framework;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
@@ -32,6 +33,26 @@ internal static class WindowClient
 	{
 		using var response = await Client.GetAsync(windowUri).ConfigureAwait(false);
 		return response.StatusCode;
+	}
+
+	/// <summary>
+	/// The readings the window is showing, as the page asks for them while it is open: one entry per
+	/// sensor, keyed by the id the page names it by, and null where the sensor has no reading.
+	/// </summary>
+	public static async Task<IReadOnlyDictionary<string, string?>> ReadValuesAsync(Uri valuesUri)
+	{
+		using var response = await Client.GetAsync(valuesUri).ConfigureAwait(false);
+
+		Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK), $"GET {valuesUri} failed.");
+		Assert.That(
+			response.Content.Headers.ContentType?.MediaType,
+			Is.EqualTo("application/json"),
+			$"GET {valuesUri} did not answer with readings.");
+
+		var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+		return JsonSerializer.Deserialize<Dictionary<string, string?>>(json)
+			?? new Dictionary<string, string?>(StringComparer.Ordinal);
 	}
 
 	/// <summary>

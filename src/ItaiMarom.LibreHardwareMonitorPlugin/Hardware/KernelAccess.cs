@@ -64,8 +64,8 @@ internal static class KernelAccess
 			? $"{Affected} are read through the {DriverName} driver, which is installed but would not "
 				+ "open. They are missing from this list until it can be opened again."
 			: $"{Affected} are read through a kernel driver, and Windows only lets an administrator open "
-				+ "it, so they are missing from this list. Start Macro Deck as an administrator to see "
-				+ "them here.";
+				+ "it, so they are missing from this list. Start Macro Deck as an administrator - "
+				+ "right-click its shortcut, Properties, Advanced, Run as administrator - to see them here.";
 	}
 
 	/// <summary>

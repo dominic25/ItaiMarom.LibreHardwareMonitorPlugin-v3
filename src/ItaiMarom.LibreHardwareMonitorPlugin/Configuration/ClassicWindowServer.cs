@@ -12,6 +12,11 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 /// Everything the classic sensor window needs to open, and everything it hands back: what it shows, the
 /// OAuth address it answers to and the state it must answer with.
 /// </summary>
+/// <param name="Values">
+/// The reading of every sensor at the moment the window opened, keyed by resource id and null for a
+/// sensor that had none. It is what the page is first drawn with; every refresh after that comes from
+/// the plugin's <c>/values</c> route.
+/// </param>
 internal sealed record ClassicWindowOpening(
 	string Title,
 	IReadOnlyList<SensorCategory> Categories,
@@ -21,7 +26,8 @@ internal sealed record ClassicWindowOpening(
 	double MaximumPollingMilliseconds,
 	string RedirectUri,
 	string State,
-	string? Notice = null);
+	string? Notice = null,
+	IReadOnlyDictionary<string, string?>? Values = null);
 
 /// <summary>What the classic sensor window sent back when the user pressed Save.</summary>
 internal sealed record ClassicWindowPayload(IReadOnlyList<string> ResourceIds, double? PollingMilliseconds);
@@ -58,11 +64,15 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 	private const int MaximumBodyBytes = 1024 * 1024;
 
+	/// <summary>Where the page asks for the readings it is showing, one refresh at a time.</summary>
+	private const string ValuesPath = "/values";
+
 	private const string HeaderTerminator = "\r\n\r\n";
 
 	private static readonly byte[] EmptyBody = [];
 
 	private readonly ILogger _logger;
+	private readonly ISensorReadingSource _readings;
 	private readonly object _sync = new();
 	private readonly Dictionary<string, Session> _sessions = new(StringComparer.Ordinal);
 
@@ -72,10 +82,11 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	private Uri? _baseUri;
 	private bool _disposed;
 
-	public ClassicWindowServer(ILogger logger)
+	public ClassicWindowServer(ILogger logger, ISensorReadingSource readings)
 	{
 		_logger = (logger ?? throw new ArgumentNullException(nameof(logger)))
 			.ForContext<ClassicWindowServer>();
+		_readings = readings ?? throw new ArgumentNullException(nameof(readings));
 	}
 
 	private sealed class Session
@@ -218,7 +229,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			{
 				var stream = client.GetStream();
 				var request = await ReadRequestAsync(stream, cancellationToken).ConfigureAwait(false);
-				var response = Route(request);
+				var response = await RouteAsync(request, cancellationToken).ConfigureAwait(false);
 
 				await WriteAsync(stream, response, cancellationToken).ConfigureAwait(false);
 			}
@@ -315,16 +326,26 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		return 0;
 	}
 
-	private HttpResponse Route(HttpRequest request)
+	private async Task<HttpResponse> RouteAsync(HttpRequest request, CancellationToken cancellationToken)
 	{
 		var key = Query(request.Target, "s");
+
+		// The readings the page is showing, which is the one route that reads the machine rather than the
+		// selection. It answers only a window this plugin is still holding, so nothing else on the machine
+		// can read the sensors through this port.
+		if (IsReadingsRequest(request))
+		{
+			return key is not null && TryGetSession(key, out _)
+				? await ReadingsAsync(cancellationToken).ConfigureAwait(false)
+				: ClosedWindow();
+		}
 
 		if (string.Equals(request.Method, "GET", StringComparison.OrdinalIgnoreCase)
 			&& (string.Equals(request.Target, "/", StringComparison.Ordinal) || request.Target.StartsWith("/?", StringComparison.Ordinal)))
 		{
 			return key is not null && TryGetSession(key, out var session)
 				? new HttpResponse(200, "OK", "text/html; charset=utf-8", Encoding.UTF8.GetBytes(ClassicWindowPage.Render(session.Opening, key)))
-				: new HttpResponse(404, "Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("This window has already been closed."));
+				: ClosedWindow();
 		}
 
 		if (string.Equals(request.Method, "POST", StringComparison.OrdinalIgnoreCase)
@@ -332,7 +353,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		{
 			return key is not null && TryGetSession(key, out var session)
 				? Save(session, key, ParseForm(request.Body))
-				: new HttpResponse(404, "Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("This window has already been closed."));
+				: ClosedWindow();
 		}
 
 		if (string.Equals(request.Target, "/favicon.ico", StringComparison.Ordinal))
@@ -342,6 +363,55 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 		return new HttpResponse(404, "Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("Not found."));
 	}
+
+	private static bool IsReadingsRequest(HttpRequest request) =>
+		string.Equals(request.Method, "GET", StringComparison.OrdinalIgnoreCase)
+		&& (string.Equals(request.Target, ValuesPath, StringComparison.Ordinal)
+			|| request.Target.StartsWith(ValuesPath + "?", StringComparison.Ordinal));
+
+	/// <summary>
+	/// One refresh of the window's value column: every sensor's reading as text, keyed by resource id, and
+	/// null for a sensor that has none.
+	/// </summary>
+	/// <remarks>
+	/// A read that fails answers with an empty set rather than an error. The page is polling, so the next
+	/// refresh a second later is a better answer than a page that has to understand failures - and the
+	/// hardware is allowed to be unreadable for a moment: a device being replaced is exactly the sort of
+	/// thing a user is in this window to notice.
+	/// </remarks>
+	private async Task<HttpResponse> ReadingsAsync(CancellationToken cancellationToken)
+	{
+		IReadOnlyDictionary<string, string?> readings;
+		try
+		{
+			readings = await _readings.ReadingsAsync(cancellationToken).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (Exception exception)
+		{
+			_logger.Warning(exception, "The classic sensor window could not read the sensors.");
+			readings = new Dictionary<string, string?>(StringComparer.Ordinal);
+		}
+
+		var payload = readings.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+
+		return new HttpResponse(
+			200,
+			"OK",
+			"application/json; charset=utf-8",
+			Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload)));
+	}
+
+	/// <summary>What a window that is no longer open, or never was, is answered with.</summary>
+	private static HttpResponse ClosedWindow() =>
+		new(
+			404,
+			"Not Found",
+			"text/plain; charset=utf-8",
+			Encoding.UTF8.GetBytes("This window has already been closed."));
 
 	/// <summary>
 	/// Records what the user chose and sends the browser on to the host's OAuth callback, which is the

@@ -1,3 +1,4 @@
+using System.Globalization;
 using LibreHardwareMonitor.Hardware;
 using MacroDeck.Sdk.Variables;
 
@@ -31,6 +32,30 @@ public static class SensorFormatting
 
 	/// <summary>How many decimals the rendered value carries.</summary>
 	public static int DecimalPlaces(SensorType sensorType) => IsIntegerLike(sensorType) ? 0 : 1;
+
+	/// <summary>
+	/// A reading as the text the sensor window puts beside it: the number at <see cref="DecimalPlaces"/>,
+	/// then the unit. Null when the sensor has no reading at all.
+	/// </summary>
+	/// <remarks>
+	/// A sensor with no value is the ordinary case the window has to survive - a fan that has stopped, a
+	/// disk that is not answering, a reading behind a driver this process is not allowed to open - so it
+	/// is reported as nothing to show. Zero would be a claim about the machine instead.
+	/// </remarks>
+	public static string? Display(HardwareSensor sample)
+	{
+		if (sample.Value is not { } value || !float.IsFinite(value))
+		{
+			return null;
+		}
+
+		var places = DecimalPlaces(sample.Sensor.SensorType);
+		var number = value.ToString(
+			string.Create(CultureInfo.InvariantCulture, $"F{places}"),
+			CultureInfo.InvariantCulture);
+
+		return Unit(sample.Sensor.SensorType) is { } unit ? $"{number} {unit}" : number;
+	}
 
 	/// <summary>
 	/// The unit symbol shown after the value, or null for a kind with no obvious one.

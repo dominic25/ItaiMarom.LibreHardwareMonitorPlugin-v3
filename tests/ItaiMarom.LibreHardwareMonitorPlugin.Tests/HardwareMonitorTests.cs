@@ -208,6 +208,41 @@ public sealed class HardwareMonitorTests
 	}
 
 	[Test]
+	public async Task Sampling_hands_back_what_every_sensor_is_reading()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Total", SensorType.Load, 42f)
+			.Add("GPU", "GPU Core", SensorType.Temperature, 60f);
+		using var logger = new LoggerConfiguration().CreateLogger();
+		await using var monitor = new HardwareMonitor(source, FastOptions, logger);
+
+		var samples = await monitor.SampleAsync();
+
+		// The window puts these beside each sensor, so it needs the reading, not just the identity - and
+		// a sensor with no reading has to come back as one that said nothing rather than be dropped.
+		Assert.That(samples, Has.Count.EqualTo(2));
+		Assert.That(samples[0].Value, Is.EqualTo(42f).Within(0.001f));
+		Assert.That(samples[1].Value, Is.EqualTo(60f).Within(0.001f));
+		Assert.That(source.LastFilter, Is.Null);
+	}
+
+	[Test]
+	public async Task A_sensor_with_no_reading_is_sampled_as_one_that_said_nothing()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Total", SensorType.Load, 42f)
+			.Add("GPU", "GPU Core", SensorType.Temperature);
+		using var logger = new LoggerConfiguration().CreateLogger();
+		await using var monitor = new HardwareMonitor(source, FastOptions, logger);
+
+		var samples = await monitor.SampleAsync();
+
+		Assert.That(samples, Has.Count.EqualTo(2));
+		Assert.That(samples[1].Sensor.SensorName, Is.EqualTo("GPU Core"));
+		Assert.That(samples[1].Value, Is.Null);
+	}
+
+	[Test]
 	public async Task Enumerating_reads_every_sensor_even_when_the_loop_is_stopped()
 	{
 		var source = new FakeHardwareSensorSource()

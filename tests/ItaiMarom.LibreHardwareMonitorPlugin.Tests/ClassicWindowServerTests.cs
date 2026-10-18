@@ -29,9 +29,14 @@ public sealed class ClassicWindowServerTests
 	private static readonly SensorIdentifier GpuCore = TestSensor.Create("GPU", "GPU Core", SensorType.Temperature);
 
 	private ClassicWindowServer _server = null!;
+	private FakeReadings _readings = null!;
 
 	[SetUp]
-	public void SetUp() => _server = new ClassicWindowServer(new LoggerConfiguration().CreateLogger());
+	public void SetUp()
+	{
+		_readings = new FakeReadings();
+		_server = new ClassicWindowServer(new LoggerConfiguration().CreateLogger(), _readings);
+	}
 
 	[TearDown]
 	public async Task TearDown() => await _server.DisposeAsync();
@@ -193,14 +198,118 @@ public sealed class ClassicWindowServerTests
 		Assert.That(page, Does.Not.Contain("class=\"notice\""));
 	}
 
+	[Test]
+	public async Task The_window_opens_on_the_reading_of_every_sensor()
+	{
+		var opened = Open(
+			[CpuCore1, CpuCore2, GpuCore],
+			Values((CpuCore1, "51 °C"), (GpuCore, "0 RPM"), (CpuCore2, null)),
+			CpuCore1);
+
+		var page = await WindowClient.ReadPageAsync(opened.PageUri);
+
+		// The reading reaches the browser in the row of the sensor that reported it, and the row names
+		// that sensor, so a cell can never be filled from the wrong sensor's reading.
+		Assert.That(
+			page,
+			Does.Contain($"data-value=\"{CpuCore1.ResourceId}\">51 {WebUtility.HtmlEncode("°C")}</span>"));
+		Assert.That(
+			page,
+			Does.Contain($"data-value=\"{GpuCore.ResourceId}\">0 RPM</span>"));
+
+		// A sensor with no reading says so rather than showing a zero it never reported.
+		Assert.That(
+			page,
+			Does.Contain($"<span class=\"value none\" data-value=\"{CpuCore2.ResourceId}\">&mdash;</span>"));
+	}
+
+	[Test]
+	public async Task The_window_is_asked_for_the_readings_and_says_where()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		var page = await WindowClient.ReadPageAsync(opened.PageUri);
+
+		Assert.That(page, Does.Contain($"var valuesUrl = \"/values?s={opened.Key}\";"));
+	}
+
+	[Test]
+	public async Task The_readings_the_window_is_showing_are_served_by_sensor_id()
+	{
+		var opened = Open([CpuCore1, CpuCore2], CpuCore1);
+		_readings.Values = Values((CpuCore1, "51 °C"), (CpuCore2, null));
+
+		var readings = await WindowClient.ReadValuesAsync(new Uri(opened.PageUri, $"/values?s={opened.Key}"));
+
+		Assert.That(readings[CpuCore1.ResourceId], Is.EqualTo("51 °C"));
+		Assert.That(readings[CpuCore2.ResourceId], Is.Null);
+	}
+
+	[Test]
+	public async Task Every_ask_for_the_readings_reads_the_machine_again()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+		_readings.Values = Values((CpuCore1, "51 °C"));
+		var valuesUri = new Uri(opened.PageUri, $"/values?s={opened.Key}");
+
+		Assert.That(
+			(await WindowClient.ReadValuesAsync(valuesUri))[CpuCore1.ResourceId],
+			Is.EqualTo("51 °C"));
+
+		_readings.Values = Values((CpuCore1, "52 °C"));
+
+		Assert.That(
+			(await WindowClient.ReadValuesAsync(valuesUri))[CpuCore1.ResourceId],
+			Is.EqualTo("52 °C"));
+	}
+
+	[Test]
+	public async Task A_read_that_fails_answers_with_nothing_rather_than_an_error()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+		_readings.Failure = new InvalidOperationException("a device vanished mid-read");
+
+		var readings = await WindowClient.ReadValuesAsync(new Uri(opened.PageUri, $"/values?s={opened.Key}"));
+
+		// The page polls, so the next ask a second later is a better answer than a failure it has to
+		// understand, and what is on screen stays rather than being blanked.
+		Assert.That(readings, Is.Empty);
+	}
+
+	[Test]
+	public async Task The_readings_are_not_served_to_a_window_that_is_not_open()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+		var stranger = new Uri(opened.PageUri, $"/values?s={new string('0', 32)}");
+
+		Assert.That(await WindowClient.ReadPageStatusAsync(stranger), Is.EqualTo(HttpStatusCode.NotFound));
+	}
+
+	private static Dictionary<string, string?> Values(
+		params (SensorIdentifier Sensor, string? Value)[] readings) =>
+		readings.ToDictionary(reading => reading.Sensor.ResourceId, reading => reading.Value);
+
 	private ClassicWindowServer.Opened Open(
 		IReadOnlyCollection<SensorIdentifier> reported,
 		params SensorIdentifier[] selected) =>
-		OpenWithNotice(null, reported, selected);
+		Open(reported, values: null, selected);
+
+	private ClassicWindowServer.Opened Open(
+		IReadOnlyCollection<SensorIdentifier> reported,
+		IReadOnlyDictionary<string, string?>? values,
+		params SensorIdentifier[] selected) =>
+		OpenWithNotice(null, reported, values, selected);
 
 	private ClassicWindowServer.Opened OpenWithNotice(
 		string? notice,
 		IReadOnlyCollection<SensorIdentifier> reported,
+		params SensorIdentifier[] selected) =>
+		OpenWithNotice(notice, reported, values: null, selected);
+
+	private ClassicWindowServer.Opened OpenWithNotice(
+		string? notice,
+		IReadOnlyCollection<SensorIdentifier> reported,
+		IReadOnlyDictionary<string, string?>? values,
 		params SensorIdentifier[] selected) =>
 		_server.Open(new ClassicWindowOpening(
 			"Libre Hardware Monitor",
@@ -211,7 +320,21 @@ public sealed class ClassicWindowServerTests
 			10000,
 			RedirectUri,
 			State,
-			notice));
+			notice,
+			values));
+
+	/// <summary>The readings the window would be reading, scripted rather than read off a machine.</summary>
+	private sealed class FakeReadings : ISensorReadingSource
+	{
+		public IReadOnlyDictionary<string, string?> Values { get; set; } =
+			new Dictionary<string, string?>(StringComparer.Ordinal);
+
+		/// <summary>Thrown from the read, to stand in for a machine that will not answer.</summary>
+		public Exception? Failure { get; set; }
+
+		public Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(CancellationToken cancellationToken) =>
+			Failure is null ? Task.FromResult(Values) : Task.FromException<IReadOnlyDictionary<string, string?>>(Failure);
+	}
 
 	private static int Occurrences(string text, string value)
 	{

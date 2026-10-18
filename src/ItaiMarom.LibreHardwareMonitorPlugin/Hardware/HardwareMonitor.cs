@@ -211,11 +211,15 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Reads every sensor once, off the loop's schedule. Used by the sensor picker and the browsable
-	/// catalog, and it is what opens the hardware when the loop is not running.
+	/// Reads every sensor once, off the loop's schedule, and hands back what each of them said. This is
+	/// what opens the hardware when the loop is not running.
 	/// </summary>
-	public async Task<IReadOnlyList<SensorIdentifier>> EnumerateSensorsAsync(
-		CancellationToken cancellationToken = default)
+	/// <remarks>
+	/// It reads the whole machine rather than the watched set, because its callers are the ones that have
+	/// to show a user what is there before anything is watched: the sensor picker's tree, and the readings
+	/// that tree puts beside each sensor.
+	/// </remarks>
+	public async Task<IReadOnlyList<HardwareSensor>> SampleAsync(CancellationToken cancellationToken = default)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -223,12 +227,21 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		try
 		{
 			EnsureOpen();
-			return _source.Read(null).Select(sample => sample.Sensor).ToArray();
+			return _source.Read(null);
 		}
 		finally
 		{
 			_hardwareGate.Release();
 		}
+	}
+
+	/// <summary>Reads every sensor once and keeps only what the sensor picker's tree is built from.</summary>
+	public async Task<IReadOnlyList<SensorIdentifier>> EnumerateSensorsAsync(
+		CancellationToken cancellationToken = default)
+	{
+		var samples = await SampleAsync(cancellationToken).ConfigureAwait(false);
+
+		return [.. samples.Select(sample => sample.Sensor)];
 	}
 
 	/// <inheritdoc />

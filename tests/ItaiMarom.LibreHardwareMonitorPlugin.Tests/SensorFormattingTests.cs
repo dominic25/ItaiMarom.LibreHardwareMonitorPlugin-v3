@@ -73,4 +73,37 @@ public sealed class SensorFormattingTests
 		// "Data" is already gigabytes, so declaring it as bytes would render 16 GB as 16 bytes.
 		Assert.That(SensorFormatting.SemanticKind(sensorType), Is.EqualTo(VariableSemanticKinds.None));
 	}
+
+	[TestCase(SensorType.Temperature, 46.4f, "46 °C")]
+	[TestCase(SensorType.Temperature, 46.6f, "47 °C")]
+	[TestCase(SensorType.Power, 13.04f, "13.0 W")]
+	[TestCase(SensorType.Load, 4f, "4 %")]
+	[TestCase(SensorType.Fan, 812.6f, "813 RPM")]
+	[TestCase(SensorType.Voltage, 0.948f, "0.9 V")]
+	public void A_reading_is_shown_at_the_precision_its_variable_carries(
+		SensorType sensorType,
+		float value,
+		string expected)
+	{
+		Assert.That(SensorFormatting.Display(Sample(sensorType, value)), Is.EqualTo(expected));
+	}
+
+	[Test]
+	public void A_reading_of_a_kind_with_no_unit_is_shown_as_the_number_alone()
+	{
+		Assert.That(SensorFormatting.Display(Sample(SensorType.Factor, 1.26f)), Is.EqualTo("1.3"));
+	}
+
+	[TestCase(null)]
+	[TestCase(float.NaN)]
+	[TestCase(float.PositiveInfinity)]
+	public void A_sensor_with_no_reading_shows_nothing(float? value)
+	{
+		// Zero would be a statement about the machine; a stopped fan and an unreadable sensor both have
+		// nothing to say, and the window says that instead.
+		Assert.That(SensorFormatting.Display(Sample(SensorType.Temperature, value)), Is.Null);
+	}
+
+	private static HardwareSensor Sample(SensorType sensorType, float? value) =>
+		new(TestSensor.Create("CPU", "CPU Core #1", sensorType), value);
 }

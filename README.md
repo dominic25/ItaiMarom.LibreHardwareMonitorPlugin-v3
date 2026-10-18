@@ -61,8 +61,9 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     MigratedSensorSelection.cs         reads the migrated selection back at startup
   Configuration/
     LibreHardwareMonitorConfigFlow.cs  the settings screen: the step that opens the classic window
-    ClassicWindowServer.cs             the loopback server the window runs on, and its one-shot payloads
-    ClassicWindowPage.cs               the old dialog, rendered server-side
+    ClassicWindowServer.cs             the loopback server: the window's page, and the readings it asks for
+    ClassicWindowPage.cs               the old dialog, rendered server-side with a live reading per sensor
+    SensorReadingSource.cs             the window's value column: one full read of the machine per refresh
     SensorCategory.cs                  the window's tree: hardware, reading kind, sensors
   manifest.json                        plugin identity, icon, entrypoints
   macrodeck-build.json                 per-RID publish recipe used by the CLI
@@ -108,8 +109,10 @@ A few decisions worth knowing about:
   which is what every old name has - so every eager definition sets its `Id` explicitly.
 - **A poll and a read never touch the hardware library directly.** A read answers from the cache and says
   "unavailable" for anything it has not seen, so a profile opened on a machine without that hardware binds
-  and reads as unavailable rather than blocking the session on enumeration. Only browsing the catalog is
-  allowed to enumerate, because that is a deliberate, user-initiated act.
+  and reads as unavailable rather than blocking the session on enumeration. Only a deliberate,
+  user-initiated act enumerates - browsing the catalog, or the settings window while it is open - and a
+  read of the whole machine takes the same semaphore the loop polls behind, so neither can catch the
+  hardware library mid-update.
 - **Values are not truncated.** The old plugin stored some sensor kinds through `(int)value`; here the full
   precision is kept and `DecimalPlaces` reproduces the rendered text the old plugin showed.
 
@@ -158,9 +161,16 @@ so the settings screen is the old dialog itself, served to the browser:
   super-I/O chip is where the voltages and the fan speeds live, and those sensors are still that
   motherboard's third-level leaves rather than a level of their own. (Each device's own `Update` is a
   no-op for what it owns, so the plugin walks the whole tree to refresh them.)
+- Every sensor carries the reading it is reporting right now, and the open page asks for them again once a
+  second, so what is being picked is a moving value rather than a name. The cell holds the sensor's id
+  rather than a position, so a refresh can only ever fill in the row it belongs to, and ticking a box,
+  opening a branch or typing in the filter is never disturbed by one. A sensor with nothing to report -
+  a stopped fan, a drive that is not answering - shows a dash, never a zero.
 - When the readings that need the hardware library's kernel driver are out of reach - it is not installed,
   or Macro Deck is not running as an administrator - the window says so in a line under its heading, and
-  the log says the same thing at the moment the hardware is opened.
+  the log says the same thing at the moment the hardware is opened. The line names the readings, says why
+  Windows keeps them out of reach, and says what to do about it, because a dash in a few hundred rows is
+  not an explanation.
 - The window opens on the configuration the plugin is already running with, so reopening it and pressing
   Save cannot lose a pick, and unticking everything is how the old dialog's "delete all variables" button
   is reached.
