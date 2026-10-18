@@ -22,10 +22,13 @@ that shape.
 Some readings are taken through a kernel driver rather than through Windows: processor temperatures and
 clocks, a motherboard's fan speeds and voltages, and a drive's health. The hardware library asks for
 [PawnIO](https://pawnio.eu), which has to be installed on the machine, and Windows only opens it for an
-administrator - so **start Macro Deck as an administrator** if you expect those readings. Everything else
-is published either way, and the sensor window says a line about it under its heading when they are out of
-reach. (The driver the Macro Deck 2 plugin's library version used let any process read the machine, which
-is why the same sensor could work there and be missing here.)
+administrator - so **start Macro Deck as an administrator** if you expect those readings: right-click
+Macro Deck's shortcut, *Properties* > *Advanced* > *Run as administrator*. If Macro Deck starts with
+Windows, elevate that startup entry too - a shortcut in the *Startup* folder, or a Task Scheduler task with
+*Run with highest privileges*. Everything else is published either way, and the sensor window says a line
+about it under its heading when they are out of reach. (The driver the Macro Deck 2 plugin's library
+version used let any process read the machine, which is why the same sensor could work there and be
+missing here.)
 
 ```
 Directory.Build.props                  shared MSBuild settings (net10.0)
