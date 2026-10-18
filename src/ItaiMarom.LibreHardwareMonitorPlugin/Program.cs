@@ -14,9 +14,11 @@ var plugin = MacroDeckPlugin.CreatePlugin(args)
     .ConfigureServices((_, services) =>
     {
         // One hardware library for the process, owned by the loop that reads it, and one selection shared
-        // by the integration that fills it and the provider that reads it.
+        // by the integration that fills it and the provider that reads it. The diagnosis is a service so
+        // the issue it feeds can be tested against a scripted answer instead of this machine's driver.
         services.AddSingleton<IHardwareSensorSource, LibreHardwareMonitorSource>();
         services.AddSingleton<SensorSelection>();
+        services.AddSingleton<IAccessDiagnosis, KernelAccessDiagnosis>();
     })
     .RegisterIntegration<LibreHardwareMonitorIntegration>()
     .Build();

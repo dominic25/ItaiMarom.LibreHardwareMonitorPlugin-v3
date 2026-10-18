@@ -148,6 +148,7 @@ public sealed class VariableProviderProtocolTests
 			{
 				services.AddSingleton<IHardwareSensorSource>(source);
 				services.AddSingleton<SensorSelection>();
+				services.AddSingleton<IAccessDiagnosis>(FakeAccessDiagnosis.Reachable());
 			})
 			.RegisterIntegration<LibreHardwareMonitorIntegration>());
 

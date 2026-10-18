@@ -25,8 +25,10 @@ clocks, a motherboard's fan speeds and voltages, and a drive's health. The hardw
 administrator - so **start Macro Deck as an administrator** if you expect those readings: right-click
 Macro Deck's shortcut, *Properties* > *Advanced* > *Run as administrator*. If Macro Deck starts with
 Windows, elevate that startup entry too - a shortcut in the *Startup* folder, or a Task Scheduler task with
-*Run with highest privileges*. Everything else is published either way, and the sensor window says a line
-about it under its heading when they are out of reach. (The driver the Macro Deck 2 plugin's library
+*Run with highest privileges*. Everything else is published either way, and the plugin says a line about it
+in three places when they are out of reach: as a warning in Macro Deck's own issue list, with a button that
+opens the settings screen; as a notification when the plugin starts, so it is seen without going looking;
+and as a line under the heading of the sensor window. (The driver the Macro Deck 2 plugin's library
 version used let any process read the machine, which is why the same sensor could work there and be
 missing here.)
 
@@ -43,6 +45,7 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     HardwareMonitor.cs                 the background polling loop and its reading cache
     HardwareMonitorOptions.cs          polling interval and staleness
     KernelAccess.cs                    why the driver-only readings are missing, in a sentence
+    IAccessDiagnosis.cs                the seam over that answer, for a test that has to know it
     HardwareLocation.cs                where a sensor sits in the hardware tree
     SensorIdentifier.cs                stable sensor identity and variable naming
     SensorFormatting.cs                how a reading is presented (decimals, unit, semantic kind)
@@ -65,6 +68,8 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     ClassicWindowPage.cs               the old dialog, rendered server-side with a live reading per sensor
     SensorReadingSource.cs             the window's value column: one full read of the machine per refresh
     SensorCategory.cs                  the window's tree: hardware, reading kind, sensors
+  Issues/
+    MissingReadingsIssueProvider.cs    the warning about readings the driver would answer with
   manifest.json                        plugin identity, icon, entrypoints
   macrodeck-build.json                 per-RID publish recipe used by the CLI
   Assets/icon.svg                      plugin icon
@@ -170,7 +175,10 @@ so the settings screen is the old dialog itself, served to the browser:
   or Macro Deck is not running as an administrator - the window says so in a line under its heading, and
   the log says the same thing at the moment the hardware is opened. The line names the readings, says why
   Windows keeps them out of reach, and says what to do about it, because a dash in a few hundred rows is
-  not an explanation.
+  not an explanation. The same sentence is also raised inside Macro Deck itself, where a user who never
+  opens the window can still see it: a warning in the host's issue list, whose button opens the settings
+  screen, and a notification when the plugin starts. All three are built from one sentence, so they cannot
+  disagree about what is missing or about how to fix it.
 - The window opens on the configuration the plugin is already running with, so reopening it and pressing
   Save cannot lose a pick, and unticking everything is how the old dialog's "delete all variables" button
   is reached.

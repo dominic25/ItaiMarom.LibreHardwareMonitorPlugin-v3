@@ -115,6 +115,7 @@ public sealed class MigrationProtocolTests
 			{
 				services.AddSingleton<IHardwareSensorSource>(source);
 				services.AddSingleton<SensorSelection>();
+				services.AddSingleton<IAccessDiagnosis>(FakeAccessDiagnosis.Reachable());
 			})
 			.RegisterIntegration<LibreHardwareMonitorIntegration>());
 

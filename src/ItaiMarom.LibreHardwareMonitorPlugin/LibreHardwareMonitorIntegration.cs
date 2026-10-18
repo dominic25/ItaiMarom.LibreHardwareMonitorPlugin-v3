@@ -1,5 +1,6 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using ItaiMarom.LibreHardwareMonitorPlugin.Issues;
 using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 using MacroDeck.Plugin.Hosting.Integrations.HostApis;
@@ -7,7 +8,9 @@ using MacroDeck.Plugin.Protocol.Handshake;
 using MacroDeck.Sdk;
 using MacroDeck.Sdk.Actions;
 using MacroDeck.Sdk.ConfigFlow;
+using MacroDeck.Sdk.Issues;
 using MacroDeck.Sdk.Migration;
+using MacroDeck.Sdk.Notifications;
 using MacroDeck.Sdk.Variables;
 using Serilog;
 
@@ -33,17 +36,25 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin;
 /// The provider does the work; this type exists to own the lifetime and to wire the two together, so the
 /// variable surface can be tested against a fake sensor source without a session.
 /// </para>
+/// <para>
+/// It also carries the one warning this plugin has, about the readings the kernel driver would answer
+/// with and this process cannot reach. That warning lives in two places on purpose: Macro Deck lists it
+/// as an issue, where it waits to be looked up, and it is raised as a notification when the plugin
+/// starts, because a user who never opens the issue list is exactly the user who would never find out.
+/// </para>
 /// </remarks>
 public sealed class LibreHardwareMonitorIntegration :
 	IPluginIntegration,
 	IMigrationProvider,
 	IVariableProvider,
 	IConfigFlowProvider,
+	IIntegrationIssueProvider,
 	IAsyncDisposable
 {
 	private readonly HardwareMonitor _hardware;
 	private readonly SensorSelection _selection;
 	private readonly SensorVariableProvider _variables;
+	private readonly MissingReadingsIssueProvider _issues;
 	private readonly IPluginCatalogNotifier _catalogNotifier;
 	private readonly ClassicWindowServer _window;
 	private readonly ILogger _logger;
@@ -52,6 +63,7 @@ public sealed class LibreHardwareMonitorIntegration :
 		ILogger logger,
 		IHardwareSensorSource source,
 		SensorSelection selection,
+		IAccessDiagnosis diagnosis,
 		IPluginCatalogNotifier catalogNotifier)
 	{
 		_logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -60,6 +72,7 @@ public sealed class LibreHardwareMonitorIntegration :
 		_hardware = new HardwareMonitor(source, HardwareMonitorOptions.Default, _logger);
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
 		_variables = new SensorVariableProvider(_hardware, selection);
+		_issues = new MissingReadingsIssueProvider(diagnosis);
 
 		// The classic sensor window is served for the whole life of the plugin rather than for one
 		// session: a flow is handed out per session and has nowhere to release it, and the listener binds
@@ -120,6 +133,21 @@ public sealed class LibreHardwareMonitorIntegration :
 		_variables.DiscoverAsync(query, cancellationToken);
 
 	/// <summary>
+	/// The one issue this plugin can raise, asked when the host asks rather than remembered from start-up.
+	/// </summary>
+	public Task<IReadOnlyList<IntegrationIssue>> GetIssuesAsync(CancellationToken cancellationToken = default) =>
+		Task.FromResult(_issues.Issues());
+
+	/// <summary>
+	/// The answer to the issue's button: it opens the settings screen, which is where the sensor window
+	/// and the live values are.
+	/// </summary>
+	public Task<IssueResolution> ResolveIssueAsync(
+		string issueId,
+		CancellationToken cancellationToken = default) =>
+		Task.FromResult(MissingReadingsIssueProvider.Resolve(issueId));
+
+	/// <summary>
 	/// Reads what a migration left behind, points the loop at those sensors and starts it. Runs once the
 	/// session is established, and again after a non-resume reconnect or a configuration change, so it is
 	/// written to be safe to run on a monitor that is already running.
@@ -149,6 +177,17 @@ public sealed class LibreHardwareMonitorIntegration :
 		// there is nothing to guard here, and it is sent on every initialize rather than only when the set
 		// changed because the host may have described us before this call read the configuration.
 		_catalogNotifier.CatalogChanged(CapabilityKinds.Variables, reason: "configuration read");
+
+		// The same warning, raised where it cannot be missed. The issue above waits to be looked up in a
+		// list, and this plugin's whole failure mode was a user not looking: processor temperatures that
+		// silently stopped moving looked exactly like a plugin that had broken. It is keyed by the issue's
+		// id so a reconnect replaces it rather than piling up a second copy, and it is held back until the
+		// plugin actually has sensors to serve, because a warning about readings nothing depends on is
+		// noise at every start-up.
+		if (_selection.Sensors.Count > 0 && _issues.Note is { } note)
+		{
+			context.Notifications.Notify(MissingReadingsIssueProvider.Notification(note));
+		}
 	}
 
 	/// <summary>

@@ -22,6 +22,7 @@ public sealed class IntegrationSmokeTests
 			logger,
 			new FakeHardwareSensorSource(),
 			new SensorSelection(),
+			FakeAccessDiagnosis.Reachable(),
 			new RecordingCatalogNotifier());
 
 		// The Macro Deck 2 plugin had no actions either: it only ever produced variables. Declaring the
@@ -39,6 +40,7 @@ public sealed class IntegrationSmokeTests
 			logger,
 			source,
 			selection,
+			FakeAccessDiagnosis.Reachable(),
 			new RecordingCatalogNotifier());
 
 		// The host asks a registered-but-not-yet-initialized integration what it has, so this has to answer
@@ -69,6 +71,7 @@ public sealed class IntegrationSmokeTests
 			logger,
 			source,
 			new SensorSelection(),
+			FakeAccessDiagnosis.Reachable(),
 			notifier);
 
 		// The host initializes an integration again after a non-resume reconnect, and stops it before doing

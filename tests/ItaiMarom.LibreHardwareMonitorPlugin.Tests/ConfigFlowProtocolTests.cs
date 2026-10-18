@@ -343,6 +343,7 @@ public sealed class ConfigFlowProtocolTests
 			{
 				services.AddSingleton<IHardwareSensorSource>(source);
 				services.AddSingleton<SensorSelection>();
+				services.AddSingleton<IAccessDiagnosis>(FakeAccessDiagnosis.Reachable());
 			})
 			.RegisterIntegration<LibreHardwareMonitorIntegration>());
 
