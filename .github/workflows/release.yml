@@ -12,5 +12,6 @@ jobs:
       id-token: write
     with:
       version: ${{ github.event.release.tag_name }}
+      cli-version: 3.0.0-beta.18
       source: 'src/ItaiMarom.LibreHardwareMonitorPlugin'
       changelog: ${{ github.event.release.body }}
