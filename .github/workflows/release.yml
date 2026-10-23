@@ -12,5 +12,5 @@ jobs:
       id-token: write
     with:
       version: ${{ github.event.release.tag_name }}
-      source: 'plugins/LibreHardwareMonitorPlugin'
+      source: 'src/ItaiMarom.LibreHardwareMonitorPlugin'
       changelog: ${{ github.event.release.body }}
