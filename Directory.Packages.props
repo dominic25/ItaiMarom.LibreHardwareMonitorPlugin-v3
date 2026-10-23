@@ -7,7 +7,7 @@
              surface moves between builds, so the version is pinned to an exact build for reproducible
              plugin releases. Override it for a one-off build against a locally packed SDK:
              `dotnet build -p:MacroDeckSdkVersion=<version>`. -->
-        <MacroDeckSdkVersion Condition="'$(MacroDeckSdkVersion)' == ''">3.0.0-preview.10</MacroDeckSdkVersion>
+        <MacroDeckSdkVersion Condition="'$(MacroDeckSdkVersion)' == ''">3.0.0-beta.18</MacroDeckSdkVersion>
     </PropertyGroup>
 
     <ItemGroup>
