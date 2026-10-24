@@ -1,4 +1,16 @@
+
 # ItaiMarom.LibreHardwareMonitorPlugin-v3
+
+A plugin that reads system hardware metrics (CPU, GPU, memory, motherboard, storage, and network sensors) using LibreHardwareMonitor and exposes them as Macro Deck variables. Requires PawnIO and administrator rights for full sensor access (CPU/fan/voltage readings).
+
+<a href="https://macro-deck.app/store/com.itaimarom.libre-hardware-monitor">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://assets.macro-deck.app/branding/Open%20in%20the%20Macro%20Deck%20Store%20Badge%20Dark.png">
+    <img alt="Open in the Macro Deck Store" src="https://assets.macro-deck.app/branding/Open%20in%20the%20Macro%20Deck%20Store%20Badge%20Light.png" height="56">
+  </picture>
+</a>
+
+## Features
 
 Macro Deck 3 out-of-process rewrite of [ItaiMarom.LibreHardwareMonitorPlugin](https://github.com/dominic25/ItaiMarom.LibreHardwareMonitorPlugin).
 
@@ -16,7 +28,6 @@ that shape.
 
 ## Requirements
 
-- .NET SDK 10.0
 - Macro Deck 3 (prerelease)
 
 Some readings are taken through a kernel driver rather than through Windows: processor temperatures and
