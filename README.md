@@ -30,18 +30,19 @@ that shape.
 
 - Macro Deck 3 (prerelease)
 
-Some readings are taken through a kernel driver rather than through Windows: processor temperatures and
-clocks, a motherboard's fan speeds and voltages, and a drive's health. The hardware library asks for
-[PawnIO](https://pawnio.eu), which has to be installed on the machine, and Windows only opens it for an
-administrator - so **start Macro Deck as an administrator** if you expect those readings: right-click
-Macro Deck's shortcut, *Properties* > *Advanced* > *Run as administrator*. If Macro Deck starts with
-Windows, elevate that startup entry too - a shortcut in the *Startup* folder, or a Task Scheduler task with
-*Run with highest privileges*. Everything else is published either way, and the plugin says a line about it
-in three places when they are out of reach: as a warning in Macro Deck's own issue list, with a button that
-opens the settings screen; as a notification when the plugin starts, so it is seen without going looking;
-and as a line under the heading of the sensor window. (The driver the Macro Deck 2 plugin's library
-version used let any process read the machine, which is why the same sensor could work there and be
-missing here.)
+## ⚠️ System Requirements and Permissions ⚠️
+
+For the plugin to read all available hardware metrics, especially **CPU temperatures, fan speeds, and voltages**, the following are mandatory:
+
+1.  **Administrator Rights:** Macro Deck **must be started as an administrator**. This is required because the underlying hardware library needs elevated privileges to access system sensors.
+    *   *Action:* Right-click Macro Deck's shortcut, go to *Properties* > *Advanced* > *Run as administrator*.
+2.  **PawnIO:** The plugin requires the [PawnIO](https://pawnio.eu) library to be installed on the machine.
+
+If these prerequisites are not met, the plugin will still function but will report "unavailable" for the restricted sensors.
+
+## Requirements
+
+- Macro Deck 3 (prerelease)
 
 ```
 Directory.Build.props                  shared MSBuild settings (net10.0)
@@ -213,22 +214,6 @@ To produce a packaged plugin with the official CLI:
 dotnet tool install --global MacroDeck.Plugin.Cli --prerelease
 macrodeck-plugin build
 ```
-
-## Package versions
-
-Every Macro Deck package is pinned by `MacroDeckSdkVersion` in `Directory.Packages.props`. The SDK
-is prerelease and its surface changes between builds, so bumping it is a deliberate act. Override it
-for a one-off build:
-
-```powershell
-dotnet build -p:MacroDeckSdkVersion=3.0.0-preview.10
-```
-
-The pinned build is `3.0.0-preview.10`, which is currently the newest published one. Note that the
-documentation on `docs.macro-deck.app` describes `main`, which is ahead of it in a few places - for
-example `MacroDeck.Sdk.Variables.VariableNames` and the `bytesPerSecond` semantic kind do not exist in
-`preview.10` yet, which is why `VariableNaming` exists in this repository. It reproduces those rules
-exactly and should be deleted once an SDK release ships them.
 
 ## Status
 
