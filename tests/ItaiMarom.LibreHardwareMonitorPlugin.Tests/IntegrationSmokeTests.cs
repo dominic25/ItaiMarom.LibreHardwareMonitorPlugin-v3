@@ -15,19 +15,25 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
 public sealed class IntegrationSmokeTests
 {
 	[Test]
-	public async Task The_integration_exposes_no_actions()
+	public async Task The_integration_exposes_the_fan_control_actions()
 	{
 		using var logger = new LoggerConfiguration().CreateLogger();
+		var source = new FakeHardwareSensorSource();
 		await using var integration = new LibreHardwareMonitorIntegration(
 			logger,
-			new FakeHardwareSensorSource(),
+			source,
 			new SensorSelection(),
 			FakeAccessDiagnosis.Reachable(),
 			new RecordingCatalogNotifier());
 
-		// The Macro Deck 2 plugin had no actions either: it only ever produced variables. Declaring the
-		// same shape here means upgrading cannot silently lose or invent a button action.
-		Assert.That(integration.Actions, Is.Empty);
+		// Building the action list must not probe hardware: the host reads it before it initializes the
+		// integration, and a driver query here would delay describing the plugin.
+		Assert.That(source.OpenCount, Is.Zero);
+		Assert.That(source.ControlReadCount, Is.Zero);
+
+		Assert.That(
+			integration.Actions.Select(action => action.Id),
+			Is.EqualTo(TestFanActions.Ids));
 	}
 
 	[Test]

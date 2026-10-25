@@ -1,7 +1,7 @@
 
 # ItaiMarom.LibreHardwareMonitorPlugin-v3
 
-A plugin that reads system hardware metrics (CPU, GPU, memory, motherboard, storage, and network sensors) using LibreHardwareMonitor and exposes them as Macro Deck variables. Requires PawnIO and administrator rights for full sensor access (CPU/fan/voltage readings).
+A plugin that reads system hardware metrics (CPU, GPU, memory, motherboard, storage, and network sensors) using LibreHardwareMonitor, exposes them as Macro Deck variables, and can set controllable fan and pump speeds from Macro Deck actions. Requires PawnIO and administrator rights for full sensor access (CPU/fan/voltage readings) and for fan control.
 
 <a href="https://macro-deck.app/store/com.itaimarom.libre-hardware-monitor">
   <picture>
@@ -15,16 +15,19 @@ A plugin that reads system hardware metrics (CPU, GPU, memory, motherboard, stor
 Macro Deck 3 out-of-process rewrite of [ItaiMarom.LibreHardwareMonitorPlugin](https://github.com/dominic25/ItaiMarom.LibreHardwareMonitorPlugin).
 
 Reads CPU, GPU, memory, motherboard, storage and network sensors through
-[LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) and exposes them
-as Macro Deck variables - no separate monitoring application required.
+[LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor), exposes them
+as Macro Deck variables - no separate monitoring application required - and offers actions that set a
+controllable fan or pump's speed or hand it back to the motherboard's own curve.
 
 ## What this is (and is not)
 
 Macro Deck 3 plugins run **out of process**: the plugin is its own .NET 10 console app that talks to
 the host over the Macro Deck 3 plugin SDK. This repository is that app.
 
-The Macro Deck 2 plugin was a **pure variable provider** - it declared no actions. The rewrite keeps
-that shape.
+The Macro Deck 2 plugin was a **pure variable provider** - it declared no actions. That is still the
+plugin's main job, and every variable it published keeps its old name. What is new is fan control: two
+actions that write to a controllable fan or pump through the same hardware library, because watching a
+fan on a button and not being able to change it was the one thing the port could not express.
 
 ## Requirements
 
@@ -62,6 +65,10 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     SensorIdentifier.cs                stable sensor identity and variable naming
     SensorFormatting.cs                how a reading is presented (decimals, unit, semantic kind)
     HardwareSensor.cs                  one sample from a source
+  Actions/
+    ControlAction.cs                   what the fan actions share: sensor picker, options, executor
+    SetFanSpeedAction.cs               set a controllable fan or pump to a percentage
+    RestoreFanControlAction.cs         hand a fan or pump back to the motherboard's curve
   Variables/
     SensorSelection.cs                 the sensors that become declared variables
     SensorVariable.cs                  a selected sensor and the name/id it is exposed under
@@ -133,6 +140,31 @@ A few decisions worth knowing about:
 - **Values are not truncated.** The old plugin stored some sensor kinds through `(int)value`; here the full
   precision is kept and `DecimalPlaces` reproduces the rendered text the old plugin showed.
 
+## How fan control works
+
+LibreHardwareMonitor exposes a control on a sensor of its own - usually a `Control` sensor beside a fan's
+RPM sensor on a super-I/O chip - and that control is only created when its kernel driver is loaded. The
+plugin therefore drives exactly the sensors that report one:
+
+- **Two actions.** **Set fan speed** takes a 0-100 slider and writes it as a software control; **Restore
+  fan control** returns the same sensor to the hardware's own curve. The undo matters: a software value
+  survives the plugin process, so without it a fan would keep a speed set once until the machine restarts.
+- **The fan list is built on demand.** The host reads `Actions` before it initializes the integration, so
+  the definitions are constructed without touching hardware. `GetDynamicOptionsAsync` enumerates the
+  controls only when the action editor opens the picker, and opens the hardware if the polling loop has
+  not.
+- **The list explains itself.** A process that cannot open the driver cannot see a control at all, so an
+  empty list is usually a fact about the process rather than about the machine. The picker says which it
+  is: it follows the monitor's own driver diagnosis, and only mentions elevation when the driver is
+  actually what is missing.
+- **Writes share the polling gate.** Every control read and write goes through `HardwareMonitor`, behind
+  the same `SemaphoreSlim` as the loop, so the hardware library is never caught mid-update.
+- **The control's own range wins.** The slider offers a percentage, but the value is clamped to the
+  control's reported minimum and maximum before it is written.
+- **A missing fan is a result, not an exception.** A button saved against a fan that has since been
+  removed returns `NOT_FOUND` with an explanation, so the flow engine reports a failure instead of a
+  crashed action.
+
 
 ## How the Macro Deck 2 migration works
 
@@ -203,6 +235,10 @@ so the settings screen is the old dialog itself, served to the browser:
 
 ## Build
 
+The plugin targets .NET 10, so the machine that builds it needs the .NET 10 SDK - the runtime Macro Deck
+ships is not enough, and an older SDK fails with `NETSDK1045: The current .NET SDK does not support
+targeting .NET 10.0`.
+
 ```powershell
 dotnet build
 dotnet test
@@ -215,6 +251,14 @@ dotnet tool install --global MacroDeck.Plugin.Cli --prerelease
 macrodeck-plugin build
 ```
 
+The CLI runs the `dotnet` it finds first on `PATH`. When .NET 10 lives somewhere else, put that directory
+in front of it for the build rather than changing the machine's default SDK:
+
+```powershell
+$env:PATH = "<dotnet-10-sdk-directory>;" + $env:PATH
+macrodeck-plugin build
+```
+
 ## Status
 
 Step-by-step port from the Macro Deck 2 plugin:
@@ -223,10 +267,10 @@ Step-by-step port from the Macro Deck 2 plugin:
 - [x] Hardware polling (out-of-process lifecycle)
 - [x] Variable surface (declared variables + browsable catalog)
 - [x] Macro Deck 2 settings migration
-- [x] Actions - none, because the Macro Deck 2 plugin had none either; `Actions` is deliberately empty
-      and the integration is a variable provider and nothing more.
 - [x] Settings screen - the Macro Deck 2 configuration dialog, carried over as the checkbox tree it always
       was, opened in the browser from a step whose only job is that button.
+- [x] Fan control - actions that set a controllable fan or pump's speed and hand it back to the
+      motherboard. Requires Macro Deck to run as administrator so the hardware library's driver loads.
 
 ## License
 

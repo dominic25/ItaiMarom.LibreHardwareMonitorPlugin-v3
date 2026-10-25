@@ -10,6 +10,7 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
 internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 {
 	private readonly List<Entry> _entries = [];
+	private readonly Dictionary<SensorIdentifier, FakeControl> _controls = [];
 
 	/// <summary>How many times the loop opened the hardware.</summary>
 	public int OpenCount { get; private set; }
@@ -20,8 +21,20 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	/// <summary>How many times the loop polled.</summary>
 	public int ReadCount { get; private set; }
 
+	/// <summary>How many times the control list was asked for.</summary>
+	public int ControlReadCount { get; private set; }
+
 	/// <summary>The hardware filter handed to the most recent <see cref="Read"/>.</summary>
 	public IReadOnlyCollection<string>? LastFilter { get; private set; }
+
+	/// <summary>The sensor id handed to the most recent <see cref="SetControl"/>, or null.</summary>
+	public string? LastSetSensorId { get; private set; }
+
+	/// <summary>The value handed to the most recent <see cref="SetControl"/>, already clamped by the fake.</summary>
+	public float? LastSetValue { get; private set; }
+
+	/// <summary>The sensor id handed to the most recent <see cref="ResetControl"/>, or null.</summary>
+	public string? LastResetSensorId { get; private set; }
 
 	public bool IsOpen { get; private set; }
 
@@ -44,6 +57,21 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	public FakeHardwareSensorSource Add(SensorIdentifier sensor, float? value = null)
 	{
 		_entries.Add(new Entry(sensor, value));
+		return this;
+	}
+
+	/// <summary>
+	/// Adds a control the action can drive. The sensor does not have to be in the read set: a control
+	/// sensor is present whether or not anything watches its reading.
+	/// </summary>
+	public FakeHardwareSensorSource AddControl(
+		SensorIdentifier sensor,
+		float min = 0f,
+		float max = 100f,
+		float value = 0f,
+		ControlMode mode = ControlMode.Undefined)
+	{
+		_controls[sensor] = new FakeControl(min, max, value, mode);
 		return this;
 	}
 
@@ -92,7 +120,68 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	}
 
 	/// <inheritdoc />
+	public IReadOnlyList<SensorIdentifier> ReadControls()
+	{
+		ControlReadCount++;
+
+		return [.. _controls.Keys];
+	}
+
+	/// <inheritdoc />
+	public bool SetControl(string sensorId, float value)
+	{
+		var (sensor, control) = FindControl(sensorId);
+		if (sensor is null)
+		{
+			return false;
+		}
+
+		_controls[sensor] = control with
+		{
+			SoftwareValue = Math.Clamp(value, control.MinSoftwareValue, control.MaxSoftwareValue),
+			Mode = ControlMode.Software,
+		};
+
+		LastSetSensorId = sensorId;
+		LastSetValue = _controls[sensor].SoftwareValue;
+		return true;
+	}
+
+	/// <inheritdoc />
+	public bool ResetControl(string sensorId)
+	{
+		var (sensor, control) = FindControl(sensorId);
+		if (sensor is null)
+		{
+			return false;
+		}
+
+		_controls[sensor] = control with { Mode = ControlMode.Default };
+		LastResetSensorId = sensorId;
+		return true;
+	}
+
+	/// <inheritdoc />
 	public void Dispose() => Close();
 
+	private (SensorIdentifier? Sensor, FakeControl Control) FindControl(string sensorId)
+	{
+		foreach (var pair in _controls)
+		{
+			if (string.Equals(pair.Key.Id, sensorId, StringComparison.Ordinal))
+			{
+				return (pair.Key, pair.Value);
+			}
+		}
+
+		return (null, default);
+	}
+
 	private sealed record Entry(SensorIdentifier Sensor, float? Value);
+
+	private readonly record struct FakeControl(
+		float MinSoftwareValue,
+		float MaxSoftwareValue,
+		float SoftwareValue,
+		ControlMode Mode);
 }

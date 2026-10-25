@@ -221,18 +221,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	/// </remarks>
 	public async Task<IReadOnlyList<HardwareSensor>> SampleAsync(CancellationToken cancellationToken = default)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
-
-		await _hardwareGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-		try
-		{
-			EnsureOpen();
-			return _source.Read(null);
-		}
-		finally
-		{
-			_hardwareGate.Release();
-		}
+		return await WithHardwareAsync(source => source.Read(null), cancellationToken).ConfigureAwait(false);
 	}
 
 	/// <summary>Reads every sensor once and keeps only what the sensor picker's tree is built from.</summary>
@@ -242,6 +231,44 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		var samples = await SampleAsync(cancellationToken).ConfigureAwait(false);
 
 		return [.. samples.Select(sample => sample.Sensor)];
+	}
+
+	/// <summary>
+	/// Reads every sensor once, off the loop's schedule, and returns the ones that expose a software
+	/// control. This is what the fan-control action asks when it has to list what it can drive.
+	/// </summary>
+	public async Task<IReadOnlyList<SensorIdentifier>> EnumerateControlsAsync(
+		CancellationToken cancellationToken = default)
+	{
+		return await WithHardwareAsync(source => source.ReadControls(), cancellationToken).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Sets a controllable sensor to a software value, going through the same gate as every poll so a
+	/// write can never catch the hardware library mid-update. Returns false when the sensor is gone.
+	/// </summary>
+	public async Task<bool> SetControlAsync(
+		string sensorId,
+		double value,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentException.ThrowIfNullOrEmpty(sensorId);
+
+		return await WithHardwareAsync(
+			source => source.SetControl(sensorId, (float)value),
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Hands a controllable sensor back to the hardware's own curve. Returns false when the sensor is gone.
+	/// </summary>
+	public async Task<bool> ResetControlAsync(string sensorId, CancellationToken cancellationToken = default)
+	{
+		ArgumentException.ThrowIfNullOrEmpty(sensorId);
+
+		return await WithHardwareAsync(
+			source => source.ResetControl(sensorId),
+			cancellationToken).ConfigureAwait(false);
 	}
 
 	/// <inheritdoc />
@@ -338,17 +365,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 			.Distinct(StringComparer.Ordinal)
 			.ToArray();
 
-		IReadOnlyList<HardwareSensor> samples;
-		await _hardwareGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-		try
-		{
-			EnsureOpen();
-			samples = _source.Read(filter);
-		}
-		finally
-		{
-			_hardwareGate.Release();
-		}
+		var samples = await WithHardwareAsync(source => source.Read(filter), cancellationToken).ConfigureAwait(false);
 
 		lock (_sync)
 		{
@@ -374,6 +391,29 @@ public sealed class HardwareMonitor : IAsyncDisposable
 			{
 				_readings.Remove(key);
 			}
+		}
+	}
+
+	/// <summary>
+	/// Runs one call into the hardware library under the gate, opening the hardware first. Every path that
+	/// touches the library outside the loop goes through here, so none of them can reach the source without
+	/// opening it, and none can leave the gate held.
+	/// </summary>
+	private async Task<T> WithHardwareAsync<T>(
+		Func<IHardwareSensorSource, T> call,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+
+		await _hardwareGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			EnsureOpen();
+			return call(_source);
+		}
+		finally
+		{
+			_hardwareGate.Release();
 		}
 	}
 

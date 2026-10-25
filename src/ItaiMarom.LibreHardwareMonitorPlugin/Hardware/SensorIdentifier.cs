@@ -111,4 +111,28 @@ public sealed record SensorIdentifier(
 			return VariableNaming.IsValid(qualified) ? qualified : "v_sensor";
 		}
 	}
+
+	/// <summary>
+	/// Whether a user's search text names this sensor: its own name, what Macro Deck calls it, its kind,
+	/// or the device and tree path it lives on. An absent search matches everything.
+	/// </summary>
+	/// <remarks>
+	/// Shared by the variable catalog's search and the fan picker. Two copies of "what a search matches"
+	/// would eventually answer the same query differently in the two places, and the difference would look
+	/// like a bug in the hardware rather than in the plugin.
+	/// </remarks>
+	public bool Matches(string? search)
+	{
+		if (string.IsNullOrWhiteSpace(search))
+		{
+			return true;
+		}
+
+		return SensorName.Contains(search, StringComparison.OrdinalIgnoreCase)
+			|| DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase)
+			|| VariableName.Contains(search, StringComparison.OrdinalIgnoreCase)
+			|| SensorType.ToString().Contains(search, StringComparison.OrdinalIgnoreCase)
+			|| Hardware.RootName.Contains(search, StringComparison.OrdinalIgnoreCase)
+			|| Hardware.Path.Contains(search, StringComparison.OrdinalIgnoreCase);
+	}
 }

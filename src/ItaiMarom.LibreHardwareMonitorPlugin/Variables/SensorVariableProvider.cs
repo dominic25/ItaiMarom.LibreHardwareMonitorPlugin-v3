@@ -166,7 +166,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 
 		if (!string.IsNullOrWhiteSpace(query.Search))
 		{
-			var matches = table.Sensors.Where(entry => Matches(entry.Sensor, query.Search)).ToArray();
+			var matches = table.Sensors.Where(entry => entry.Sensor.Matches(query.Search)).ToArray();
 			return Page(matches, query.PageSize, offset, entry => SensorDefinition(entry.Sensor, entry.Id, entry.ParentId));
 		}
 
@@ -259,13 +259,6 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	private static bool IsUsable(CatalogSnapshot? snapshot, bool refresh) =>
 		snapshot is not null
 		&& (!refresh || DateTimeOffset.UtcNow - snapshot.BuiltAt < CatalogLifetime);
-
-	private static bool Matches(SensorIdentifier sensor, string search) =>
-		sensor.SensorName.Contains(search, StringComparison.OrdinalIgnoreCase)
-		|| sensor.VariableName.Contains(search, StringComparison.OrdinalIgnoreCase)
-		|| sensor.SensorType.ToString().Contains(search, StringComparison.OrdinalIgnoreCase)
-		|| sensor.Hardware.RootName.Contains(search, StringComparison.OrdinalIgnoreCase)
-		|| sensor.Hardware.Path.Contains(search, StringComparison.OrdinalIgnoreCase);
 
 	private static VariableDefinition HardwareDefinition(SensorCatalogNode node) =>
 		VariableDefinition.OnDemand(node.Id, VariableType.Numeric) with

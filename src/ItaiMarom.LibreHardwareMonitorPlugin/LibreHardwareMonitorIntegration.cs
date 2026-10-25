@@ -1,3 +1,4 @@
+using ItaiMarom.LibreHardwareMonitorPlugin.Actions;
 using ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Issues;
@@ -21,11 +22,16 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin;
 /// </summary>
 /// <remarks>
 /// <para>
-/// It has no actions, because the Macro Deck 2 plugin had none - everything it offered was a variable -
-/// and it serves variables two ways. The sensors the user selected, or that a migrated Macro Deck 2
+/// It serves variables two ways. The sensors the user selected, or that a migrated Macro Deck 2
 /// configuration asked for, are declared as ordinary variables so the button that used
 /// <c>{{cpu_core__1_temperature}}</c> still resolves; every other sensor is reachable on demand through
 /// the catalog, without anything being declared up front.
+/// </para>
+/// <para>
+/// It also offers the two fan-control actions - set a fan to a percentage, and hand it back to the
+/// motherboard - because a user who can watch a fan from a button reasonably wants to change it from the
+/// same button. Both only enumerate or write when they run: building this list touches no hardware, which
+/// the host relies on when it describes the plugin before initializing it.
 /// </para>
 /// <para>
 /// Selecting which sensors those are is the settings screen the old plugin's configuration dialog became:
@@ -73,6 +79,11 @@ public sealed class LibreHardwareMonitorIntegration :
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
 		_variables = new SensorVariableProvider(_hardware, selection);
 		_issues = new MissingReadingsIssueProvider(diagnosis);
+		Actions =
+		[
+			new SetFanSpeedAction(_hardware, _logger),
+			new RestoreFanControlAction(_hardware, _logger),
+		];
 
 		// The classic sensor window is served for the whole life of the plugin rather than for one
 		// session: a flow is handed out per session and has nowhere to release it, and the listener binds
@@ -98,7 +109,7 @@ public sealed class LibreHardwareMonitorIntegration :
 		new LibreHardwareMonitorConfigFlow(_hardware, _selection, _window, _logger);
 
 	/// <inheritdoc />
-	public IReadOnlyList<IActionDefinition> Actions { get; } = [];
+	public IReadOnlyList<IActionDefinition> Actions { get; }
 
 	/// <inheritdoc />
 	public IReadOnlyList<VariableDefinition> Variables => _variables.Variables;

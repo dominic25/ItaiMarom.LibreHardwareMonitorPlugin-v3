@@ -259,6 +259,75 @@ public sealed class HardwareMonitorTests
 	}
 
 	[Test]
+	public async Task Controls_are_enumerated_and_written_through_the_same_gate()
+	{
+		var fan = TestFanActions.Control("Fan #1");
+		var source = new FakeHardwareSensorSource().AddControl(fan);
+		using var logger = new LoggerConfiguration().CreateLogger();
+		await using var monitor = new HardwareMonitor(source, FastOptions, logger);
+
+		// Enumerating controls opens the hardware even when the loop is stopped, because the action editor
+		// asks before anything is being watched.
+		var controls = await monitor.EnumerateControlsAsync();
+
+		Assert.That(controls, Is.EqualTo(new[] { fan }));
+		Assert.That(source.OpenCount, Is.EqualTo(1));
+
+		Assert.That(await monitor.SetControlAsync(fan.Id, 42), Is.True);
+		Assert.That(source.LastSetSensorId, Is.EqualTo(fan.Id));
+		Assert.That(source.LastSetValue, Is.EqualTo(42f).Within(0.001f));
+
+		Assert.That(await monitor.ResetControlAsync(fan.Id), Is.True);
+		Assert.That(source.LastResetSensorId, Is.EqualTo(fan.Id));
+	}
+
+	[Test]
+	public async Task A_write_waits_for_the_poll_that_holds_the_gate()
+	{
+		var fan = TestFanActions.Control("Fan #1");
+		var polling = new TaskCompletionSource();
+		var release = new TaskCompletionSource();
+		var source = new FakeHardwareSensorSource().AddControl(fan);
+		source.OnRead = () =>
+		{
+			polling.TrySetResult();
+			release.Task.GetAwaiter().GetResult();
+		};
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		await using var monitor = new HardwareMonitor(source, FastOptions, logger);
+
+		monitor.SetWatchedSensors([fan]);
+		monitor.Start();
+		await polling.Task.WaitAsync(Patience);
+
+		// The poll is inside the gate, so the write cannot have reached the hardware yet. This is the
+		// guarantee that keeps a button press out of the middle of an update.
+		var write = monitor.SetControlAsync(fan.Id, 30);
+		Assert.That(write.IsCompleted, Is.False);
+
+		release.SetResult();
+
+		Assert.That(await write.WaitAsync(Patience), Is.True);
+		Assert.That(source.LastSetValue, Is.EqualTo(30f).Within(0.001f));
+
+		await monitor.StopAsync();
+	}
+
+	[Test]
+	public async Task Writing_a_control_of_a_sensor_that_is_gone_answers_false()
+	{
+		var source = new FakeHardwareSensorSource();
+		using var logger = new LoggerConfiguration().CreateLogger();
+		await using var monitor = new HardwareMonitor(source, FastOptions, logger);
+
+		// A button saved against a fan that has been unplugged must resolve to "it is not there" rather
+		// than throw out of the action.
+		Assert.That(await monitor.SetControlAsync("/test/motherboard/fan/fan", 50), Is.False);
+		Assert.That(await monitor.ResetControlAsync("/test/motherboard/fan/fan"), Is.False);
+	}
+
+	[Test]
 	public async Task Disposing_stops_the_loop_and_closes_the_hardware()
 	{
 		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);

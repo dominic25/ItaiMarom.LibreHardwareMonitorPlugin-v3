@@ -29,4 +29,30 @@ public interface IHardwareSensorSource : IDisposable
 	/// picker and the browsable catalog need.
 	/// </param>
 	IReadOnlyList<HardwareSensor> Read(IReadOnlyCollection<string>? hardwareFilter);
+
+	/// <summary>
+	/// Updates the hardware and returns every sensor that exposes a software control - the fans and pumps
+	/// a super-I/O chip lets the plugin drive.
+	/// </summary>
+	/// <remarks>
+	/// The control only exists when the library could reach the chip, which on Windows means the kernel
+	/// driver loaded - so an empty list is the ordinary answer for a plugin that is not elevated. Only the
+	/// identity travels: the library's own <c>IControl</c> stays behind this seam, so a caller cannot hold
+	/// one across an update.
+	/// </remarks>
+	IReadOnlyList<SensorIdentifier> ReadControls();
+
+	/// <summary>
+	/// Sets a control's software value, clamped to the range that control reports. Returns false when no
+	/// controllable sensor has this identifier, which is how a fan that has since vanished is reported.
+	/// </summary>
+	/// <param name="sensorId">The sensor's library identifier, as <see cref="SensorIdentifier.Id"/> holds it.</param>
+	/// <param name="value">The requested value, normally a percentage of the control's range.</param>
+	bool SetControl(string sensorId, float value);
+
+	/// <summary>
+	/// Hands a control back to the hardware's own curve - what the BIOS does when nothing is driving it -
+	/// and returns false when no controllable sensor has this identifier.
+	/// </summary>
+	bool ResetControl(string sensorId);
 }

@@ -4,6 +4,11 @@
 [Oo]ut/
 publish/
 
+# Packaged plugin artifacts and the scratch builds around them
+dist/
+out-test/
+*.macroDeckPlugin
+
 # Local Macro Deck SDK packages built by `dotnet pack`
 local-feed/*
 !local-feed/.gitkeep

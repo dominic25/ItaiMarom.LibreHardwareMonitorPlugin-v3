@@ -50,14 +50,67 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 			// voltages are read - so the whole tree is walked. The old plugin did the same with a visitor;
 			// it just never listed what it found down there.
 			Update(hardware);
-			Collect(hardware, HardwareLocation.Root(hardware.Identifier.ToString(), hardware.Name), sensors);
+
+			foreach (var (sensor, native) in Walk(hardware, RootOf(hardware)))
+			{
+				sensors.Add(new HardwareSensor(sensor, native.Value));
+			}
 		}
 
 		return sensors;
 	}
 
 	/// <inheritdoc />
+	public IReadOnlyList<SensorIdentifier> ReadControls()
+	{
+		var controls = new List<SensorIdentifier>();
+		foreach (var hardware in _computer.Hardware)
+		{
+			Update(hardware);
+
+			// Which sensors carry a control is the library's answer, not the sensor type's: a super-I/O
+			// chip exposes a Control sensor of its own beside the fan's RPM sensor, and only that one has
+			// an IControl behind it.
+			controls.AddRange(Walk(hardware, RootOf(hardware))
+				.Where(entry => entry.Native.Control is not null)
+				.Select(entry => entry.Sensor));
+		}
+
+		return controls;
+	}
+
+	/// <inheritdoc />
+	public bool SetControl(string sensorId, float value)
+	{
+		if (FindControl(sensorId) is not { } control)
+		{
+			return false;
+		}
+
+		// The control's own range is the authority: the plugin asks in percentages, but a write outside
+		// what the chip accepts is a request it never agreed to.
+		control.SetSoftware(Math.Clamp(value, control.MinSoftwareValue, control.MaxSoftwareValue));
+		return true;
+	}
+
+	/// <inheritdoc />
+	public bool ResetControl(string sensorId)
+	{
+		if (FindControl(sensorId) is not { } control)
+		{
+			return false;
+		}
+
+		control.SetDefault();
+		return true;
+	}
+
+	/// <inheritdoc />
 	public void Dispose() => _computer.Close();
+
+	/// <summary>The identity of one top-level device, which is what every sensor below it hangs off.</summary>
+	private static HardwareLocation RootOf(IHardware hardware) =>
+		HardwareLocation.Root(hardware.Identifier.ToString(), hardware.Name);
 
 	/// <summary>Updates one piece of hardware and everything below it, because it does not do that itself.</summary>
 	private static void Update(IHardware hardware)
@@ -70,22 +123,53 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 		}
 	}
 
-	private static void Collect(IHardware hardware, HardwareLocation location, List<HardwareSensor> into)
+	/// <summary>
+	/// Walks a device and everything below it, pairing each sensor with the identity the plugin keys it
+	/// by and with the library's own <see cref="ISensor"/> - the only thing that knows whether the sensor
+	/// carries a control.
+	/// </summary>
+	private static IEnumerable<(SensorIdentifier Sensor, ISensor Native)> Walk(
+		IHardware hardware,
+		HardwareLocation location)
 	{
 		foreach (var sensor in hardware.Sensors)
 		{
-			var identifier = new SensorIdentifier(
+			yield return (new SensorIdentifier(
 				location,
 				sensor.Identifier.ToString(),
 				sensor.Name,
-				sensor.SensorType);
-
-			into.Add(new HardwareSensor(identifier, sensor.Value));
+				sensor.SensorType), sensor);
 		}
 
 		foreach (var subHardware in hardware.SubHardware)
 		{
-			Collect(subHardware, location.Child(subHardware.Identifier.ToString(), subHardware.Name), into);
+			var subLocation = location.Child(subHardware.Identifier.ToString(), subHardware.Name);
+			foreach (var entry in Walk(subHardware, subLocation))
+			{
+				yield return entry;
+			}
 		}
+	}
+
+	/// <summary>
+	/// Finds the control a write names. There is no <see cref="Update"/> here on purpose: a control is
+	/// attached to its sensor when the hardware is created, and its range belongs to the chip, so a write
+	/// depends on nothing a poll refreshes.
+	/// </summary>
+	private IControl? FindControl(string sensorId)
+	{
+		foreach (var hardware in _computer.Hardware)
+		{
+			foreach (var (sensor, native) in Walk(hardware, RootOf(hardware)))
+			{
+				if (native.Control is { } control
+					&& string.Equals(sensor.Id, sensorId, StringComparison.Ordinal))
+				{
+					return control;
+				}
+			}
+		}
+
+		return null;
 	}
 }
