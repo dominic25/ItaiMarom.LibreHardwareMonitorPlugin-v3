@@ -268,3 +268,44 @@ Step-by-step port from the Macro Deck 2 plugin:
       was, opened in the browser from a step whose only job is that button.
 - [x] Fan control - actions that set a controllable fan or pump's speed and hand it back to the
       motherboard. Requires Macro Deck to run as administrator so the hardware library's driver loads.
+
+## Next
+
+### Elevated hardware helper (TODO)
+
+Today the driver-backed readings and fan control need Macro Deck itself to run as administrator. The
+plugin already detects that case and says what is missing (`KernelAccess`); the fix is to move the
+privilege into a helper the plugin owns:
+
+- the plugin starts unelevated, detects it, and offers **Enable elevated readings** in its issue entry;
+- that button relaunches the same binary with `--hardware-host` through `Verb = "runas"`; the UAC
+  dialog is the prompt the user sees, and `ERROR_CANCELLED` falls back to the current limited mode;
+- the elevated copy owns the `Computer`, the polling loop and the control writes, and serves a narrow
+  named-pipe protocol: enumerate, sample, write control, restore control, ping, stop;
+- the host-facing plugin stays alive and proxies `IHardwareSensorSource` to that pipe; a job object
+  kills the helper with the plugin;
+- the package ships the apphost so the UAC dialog names the plugin, and the helper is windowless.
+
+Accepted constraints: two processes rather than one, one UAC per Macro Deck start (UAC cannot remember
+a choice), and the prompt appears on the PC rather than on the deck. A scheduled task or a service
+would remove the per-start prompt but adds a protected install path and an update path. If PawnIO ever
+exposes non-admin read-only access, this item goes away entirely.
+
+## Maybe
+
+### Fan curves
+
+A temperature-to-speed curve per fan (or per fan group, once groups exist), evaluated by the polling
+loop. Configured in the settings window as a **Fan curves** tab - source sensor, points, minimum,
+hysteresis - not in a widget: a curve belongs to a fan, and two tiles must not disagree about it.
+
+- Start with four predefined curves (Quiet, Balanced, Performance, Full) and a **Set fan preset**
+  action; custom points later.
+- The deck switches modes and presets and shows state (`fan_mode`, `fan_curve_target`,
+  `fan_curve_active`); it does not draw the curve. The built-in Slider stays the manual override and
+  pauses the curve when touched.
+- Safety: clamp per fan, never below the configured minimum, 100 % above a critical temperature, hold
+  the last target if the source sensor disappears.
+- Not before a fan can be controlled reliably on real hardware; a curve on top of an unverified write
+  path is a way to cook something.
+
