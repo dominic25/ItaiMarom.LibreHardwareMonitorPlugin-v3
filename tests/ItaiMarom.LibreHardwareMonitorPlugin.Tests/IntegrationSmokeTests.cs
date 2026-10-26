@@ -117,6 +117,7 @@ public sealed class IntegrationSmokeTests
 
 		await integration.InitializeAsync(context);
 		await integration.InitializeAsync(context);
+		await WaitUntilAsync(() => source.OpenCount == 1);
 		await integration.ShutdownAsync();
 		await integration.ShutdownAsync();
 
@@ -129,5 +130,25 @@ public sealed class IntegrationSmokeTests
 		Assert.That(notifier.Announcements, Is.Not.Empty);
 		Assert.That(notifier.Announcements, Has.All.Matches<(string Kind, string? LocalId, string? Reason)>(
 			a => a.Kind == "variables"));
+	}
+
+	/// <summary>
+	/// Waits for the loop to reach the hardware. Stopping before it has opened is a race the assertion
+	/// about the open count cannot describe, so the test waits for the open it is about to check.
+	/// </summary>
+	private static async Task WaitUntilAsync(Func<bool> condition)
+	{
+		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+		while (DateTime.UtcNow < deadline)
+		{
+			if (condition())
+			{
+				return;
+			}
+
+			await Task.Delay(10);
+		}
+
+		Assert.Fail("The condition was still false after 5 seconds.");
 	}
 }

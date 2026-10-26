@@ -464,6 +464,18 @@ internal static class ClassicWindowPage
 			.Append(WebUtility.HtmlEncode(sensor.LegacyToken))
 			.Append("</span>");
 
+		AppendControlBadge(builder, sensor);
+
+		builder.Append(ValueCell(sensor, values))
+			.Append("</label></li>\n");
+	}
+
+	/// <summary>
+	/// The badge that explains what a sensor can be used for, if anything: driven by the Slider, or - for
+	/// a control sensor the library gave no control - why it cannot be.
+	/// </summary>
+	private static void AppendControlBadge(StringBuilder builder, SensorIdentifier sensor)
+	{
 		if (sensor.Controllable)
 		{
 			builder.Append(
@@ -474,9 +486,6 @@ internal static class ClassicWindowPage
 			builder.Append(
 				"<span class=\"readonly\" title=\"This is a control sensor, but the hardware library attached no software control to it, so it can only be watched.\">read-only</span>");
 		}
-
-		builder.Append(ValueCell(sensor, values))
-			.Append("</label></li>\n");
 	}
 
 	/// <summary>

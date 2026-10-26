@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 using LibreHardwareMonitor.Hardware;
@@ -249,6 +250,48 @@ public sealed class SensorVariableProviderTests
 	}
 
 	[Test]
+	public async Task A_number_serialized_as_text_is_accepted()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1");
+		fixture.Select(fan);
+
+		var result = await fixture.Provider.SetValueAsync(fan.VariableId, "42.5");
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.Applied));
+		Assert.That(fixture.Source.LastSetValue, Is.EqualTo(42.5f).Within(0.001f));
+	}
+
+	[Test]
+	public async Task A_number_serialized_as_json_is_accepted()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1");
+		fixture.Select(fan);
+		using var document = JsonDocument.Parse("42.5");
+
+		var result = await fixture.Provider.SetValueAsync(fan.VariableId, document.RootElement);
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.Applied));
+		Assert.That(fixture.Source.LastSetValue, Is.EqualTo(42.5f).Within(0.001f));
+	}
+
+	[Test]
+	public async Task Text_that_could_be_read_two_ways_is_refused_rather_than_guessed()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1");
+		fixture.Select(fan);
+
+		// Read with the invariant culture, "40,5" is a thousands separator and means 405; read by a user
+		// in a comma-decimal culture it means 40.5. Guessing either way can slam a fan to its maximum.
+		var result = await fixture.Provider.SetValueAsync(fan.VariableId, "40,5");
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.InvalidValue));
+		Assert.That(fixture.Source.LastSetSensorId, Is.Null);
+	}
+
+	[Test]
 	public async Task Writing_an_id_nothing_knows_about_answers_not_found()
 	{
 		await using var fixture = new Fixture();
@@ -288,6 +331,21 @@ public sealed class SensorVariableProviderTests
 	}
 
 	[Test]
+	public async Task A_hardware_failure_during_a_write_answers_unavailable()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1", value: 50f);
+		fixture.Select(fan);
+		fixture.Source.OnSetControl = () => throw new InvalidOperationException("the driver refused the write");
+
+		// The value was not applied and the sensor cannot be driven right now, which is the one answer the
+		// host needs: the Slider stays where the chip still is instead of settling on a value it never took.
+		var result = await fixture.Provider.SetValueAsync(fan.VariableId, 40d);
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.Unavailable));
+	}
+
+	[Test]
 	public async Task The_catalog_marks_the_sensors_it_can_write()
 	{
 		await using var fixture = new Fixture();
@@ -305,6 +363,37 @@ public sealed class SensorVariableProviderTests
 		Assert.That(fanDefinition.Write!.CommitOnRelease, Is.True);
 		Assert.That(voltageDefinition.CanWrite, Is.False);
 		Assert.That(voltageDefinition.Write, Is.Null);
+	}
+
+	[Test]
+	public async Task Attaching_enumerates_so_a_restored_binding_resolves_writable()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1");
+
+		// The host attaches a provider before it re-applies the declarations of the catalog bindings it
+		// restored at boot. Without enumerating here the definition carries no Write, and the host refuses
+		// the Slider's write before the provider ever sees it.
+		await fixture.Provider.OnAttachedAsync(new FakeVariableSink());
+
+		var definition = await fixture.Provider.ResolveAsync(fan.ResourceId);
+
+		Assert.That(definition, Is.Not.Null);
+		Assert.That(definition!.CanWrite, Is.True);
+		Assert.That(definition.Write, Is.Not.Null);
+		Assert.That(definition.Write!.CommitOnRelease, Is.True);
+	}
+
+	[Test]
+	public async Task A_hardware_failure_while_attaching_does_not_throw()
+	{
+		await using var fixture = new Fixture();
+		fixture.AddControl("Fan #1");
+		fixture.Source.OnRead = () => throw new InvalidOperationException("the driver refused to answer");
+
+		// Attaching is not the place to fail a session: a catalog that cannot enumerate is empty, which
+		// is the answer a browse already gives.
+		Assert.DoesNotThrowAsync(async () => await fixture.Provider.OnAttachedAsync(new FakeVariableSink()));
 	}
 
 	[Test]
@@ -466,6 +555,9 @@ public sealed class SensorVariableProviderTests
 		Assert.That(page.Items.Select(item => item.Name), Is.EqualTo(new List<string> { "cpu", "motherboard" }));
 		Assert.That(page.Items, Has.All.Matches<VariableDefinition>(item => item.IsContainer));
 		Assert.That(page.Items, Has.All.Matches<VariableDefinition>(item => !item.IsBindable));
+		Assert.That(
+			page.Items,
+			Has.All.Matches<VariableDefinition>(item => item.RefreshInterval == TimeSpan.FromMilliseconds(10)));
 		Assert.That(page.ContinuationToken, Is.Null);
 	}
 
@@ -624,6 +716,19 @@ public sealed class SensorVariableProviderTests
 		}
 
 		Assert.Fail($"The condition was still false after {Patience}.");
+	}
+
+	/// <summary>A sink for the attach tests: they only care that attaching succeeds.</summary>
+	private sealed class FakeVariableSink : IVariableSink
+	{
+		public Task PublishAsync(
+			IReadOnlyCollection<VariableValue> values,
+			CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+		public Task PublishAsync(VariableValue value, CancellationToken cancellationToken = default) =>
+			Task.CompletedTask;
+
+		public Task InvalidateCatalogAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 	}
 
 	/// <summary>Fake hardware, a real polling loop and the provider wired to both.</summary>

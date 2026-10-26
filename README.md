@@ -161,8 +161,9 @@ plugin therefore drives exactly the sensors that report one:
   Deck's own **Slider** widget can bind to a declared variable or to a catalog binding and drive it
   two-way. The reading carries the control's reported range and a one-percent step, the drag commits on
   release rather than writing at every intermediate point, and after an applied write the plugin asks the
-  host to read the definition again so the slider settles on what the chip accepted. No plugin-specific
-  widget is involved.
+  host to read the definition again so the slider settles on what the chip accepted. A catalog binding
+  restored at boot resolves after an attach-time enumeration, so it is still writable across a restart
+  instead of only after the user rebinds it. No plugin-specific widget is involved.
 - **The fan list is built on demand.** The host reads `Actions` before it initializes the integration, so
   the definitions are constructed without touching hardware. `GetDynamicOptionsAsync` enumerates the
   controls only when the action editor opens the picker, and opens the hardware if the polling loop has

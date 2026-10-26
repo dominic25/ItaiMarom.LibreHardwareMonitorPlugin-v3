@@ -88,8 +88,10 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 		}
 
 		// The control's own range is the authority: the plugin asks in percentages, but a write outside
-		// what the chip accepts is a request it never agreed to.
-		control.SetSoftware(Math.Clamp(value, control.MinSoftwareValue, control.MaxSoftwareValue));
+		// what the chip accepts is a request it never agreed to. A chip that reports no usable span has
+		// nothing to clamp to, so the request is left to the library rather than clamped against nonsense.
+		control.SetSoftware(
+			TryGetRange(control, out var range) ? Math.Clamp(value, range.Min, range.Max) : value);
 		return true;
 	}
 
@@ -113,14 +115,34 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 		HardwareLocation.Root(hardware.Identifier.ToString(), hardware.Name);
 
 	/// <summary>
-	/// The span a sensor's control accepts, or null when the library gave it no control. The chip owns the
-	/// range, so it is read here rather than assumed: the plugin asks in percentages and the library holds
-	/// the request to these same numbers.
+	/// The span a sensor's control accepts, or null when the library gave it no control or reported a span
+	/// a Slider cannot use. The chip owns the range, so it is read here rather than assumed: the plugin
+	/// asks in percentages and the library holds the request to these same numbers.
 	/// </summary>
+	/// <remarks>
+	/// A non-finite or reversed pair would give the widget a track with no landing place, and a zero-width
+	/// one no position at all, so it is reported as "no control range" rather than passed through.
+	/// </remarks>
 	private static ControlRange? Range(ISensor sensor) =>
-		sensor.Control is { } control
-			? new ControlRange(control.MinSoftwareValue, control.MaxSoftwareValue)
-			: null;
+		sensor.Control is { } control && TryGetRange(control, out var range) ? range : null;
+
+	/// <summary>
+	/// Reads a control's software span, rejecting the pairs that cannot describe a track.
+	/// </summary>
+	private static bool TryGetRange(IControl control, out ControlRange range)
+	{
+		var min = control.MinSoftwareValue;
+		var max = control.MaxSoftwareValue;
+
+		if (float.IsFinite(min) && float.IsFinite(max) && min < max)
+		{
+			range = new ControlRange(min, max);
+			return true;
+		}
+
+		range = default;
+		return false;
+	}
 
 	/// <summary>Updates one piece of hardware and everything below it, because it does not do that itself.</summary>
 	private static void Update(IHardware hardware)

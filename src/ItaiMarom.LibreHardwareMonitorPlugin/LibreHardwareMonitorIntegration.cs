@@ -196,7 +196,7 @@ public sealed class LibreHardwareMonitorIntegration :
 	{
 		ArgumentNullException.ThrowIfNull(context);
 
-		_variableApi = context.Variables;
+		Volatile.Write(ref _variableApi, context.Variables);
 
 		// What the host holds is the whole of what this plugin is configured with, so it is read on every
 		// initialize rather than cached: an entry the user removed has to stop being a variable.
@@ -234,9 +234,15 @@ public sealed class LibreHardwareMonitorIntegration :
 
 	/// <summary>
 	/// Stops the loop without tearing the monitor down, because initialization may well follow this and
-	/// expects to get the same object back.
+	/// expects to get the same object back. The host handle is dropped first: a write that arrives while
+	/// the session is going away has nowhere useful to announce itself, and asking a closed host to
+	/// re-read a definition must not turn an applied write into an error.
 	/// </summary>
-	public Task ShutdownAsync() => _hardware.StopAsync();
+	public async Task ShutdownAsync()
+	{
+		Volatile.Write(ref _variableApi, null);
+		await _hardware.StopAsync().ConfigureAwait(false);
+	}
 
 	/// <inheritdoc />
 	public async ValueTask DisposeAsync()
@@ -260,7 +266,7 @@ public sealed class LibreHardwareMonitorIntegration :
 	/// </remarks>
 	private async Task RefreshDefinitionAsync(string localId, CancellationToken cancellationToken)
 	{
-		if (_variableApi is not { } api)
+		if (Volatile.Read(ref _variableApi) is not { } api)
 		{
 			return;
 		}

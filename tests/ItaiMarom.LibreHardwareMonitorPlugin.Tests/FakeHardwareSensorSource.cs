@@ -41,6 +41,12 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	/// <summary>Runs inside <see cref="Read"/>, on the loop's thread. Used to block or observe a poll.</summary>
 	public Action? OnRead { get; set; }
 
+	/// <summary>
+	/// Runs at the start of <see cref="SetControl"/>, on the caller's thread. Used to simulate a device
+	/// that throws instead of accepting the value.
+	/// </summary>
+	public Action? OnSetControl { get; set; }
+
 	/// <summary>The registered sensors, in the order they were added.</summary>
 	public IReadOnlyList<SensorIdentifier> Sensors =>
 		_entries.Select(entry => entry.Sensor).ToArray();
@@ -147,6 +153,8 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	/// <inheritdoc />
 	public bool SetControl(string sensorId, float value)
 	{
+		OnSetControl?.Invoke();
+
 		var (sensor, control) = FindControl(sensorId);
 		if (sensor is null)
 		{

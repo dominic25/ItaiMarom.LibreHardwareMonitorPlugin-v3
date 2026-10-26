@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using MacroDeck.Localization;
 using MacroDeck.Sdk.Variables;
@@ -30,6 +31,12 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	/// <summary>Most entries served in one catalog page, whatever the host asks for.</summary>
 	private const int MaxPageSize = 200;
 
+	/// <summary>
+	/// The Slider's step on a control, in percent: the resolution of a chip's duty cycle. Anything finer
+	/// would be a position the hardware rounds away.
+	/// </summary>
+	private const double ControlStep = 1;
+
 	private readonly HardwareMonitor _monitor;
 	private readonly SensorSelection _selection;
 	private readonly SemaphoreSlim _tableGate = new(1, 1);
@@ -53,7 +60,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	/// the next definition the host asks for has to carry the new rate. Declaring it is what stops the
 	/// host from falling back to its own five-second default for an eager variable.
 	/// </remarks>
-	private TimeSpan RefreshInterval => _monitor.Options.PollingInterval;
+	private TimeSpan HostRefreshInterval => _monitor.Options.PollingInterval;
 
 	/// <inheritdoc />
 	/// <remarks>
@@ -67,7 +74,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	{
 		get
 		{
-			var interval = RefreshInterval;
+			var interval = HostRefreshInterval;
 			return EagerVariables().Select(variable => variable.EagerDefinition(interval)).ToArray();
 		}
 	}
@@ -80,6 +87,30 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 
 	/// <inheritdoc />
 	public bool SupportsSearch => true;
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// The host attaches a provider before it re-applies the declarations of the catalog bindings it
+	/// restored at boot, and a writable sensor's declaration is only complete once the tree has been
+	/// enumerated. Enumerating here - once per attach, best effort - is what lets a Slider saved against
+	/// a catalog sensor resolve with its write capability instead of staying read-only until some later
+	/// reconcile. It costs nothing extra: the same reconcile calls <see cref="SubscribeAsync"/> moments
+	/// later, which would have built this table anyway.
+	/// </remarks>
+	public async Task OnAttachedAsync(IVariableSink sink, CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(sink);
+
+		try
+		{
+			await GetTableAsync(refresh: false, cancellationToken).ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is not OperationCanceledException)
+		{
+			// Attaching must not fail because a device refused to answer. The catalog stays empty and the
+			// bindings stay read-only until the next successful enumeration, exactly as a browse would.
+		}
+	}
 
 	/// <inheritdoc />
 	/// <remarks>
@@ -97,11 +128,10 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		}
 
 		// A bound Slider takes its track from the reading rather than from the definition, so a fan's own
-		// span travels with its value. The step is one percent because that is the resolution of a chip's
-		// duty cycle: anything finer would be a position the hardware rounds away.
+		// span travels with its value.
 		return new ValueTask<VariableReading>(
 			control is { } range
-				? VariableReading.Of(value, range.Min, range.Max, 1)
+				? VariableReading.Of(value, range.Min, range.Max, ControlStep)
 				: VariableReading.Of(value));
 	}
 
@@ -147,8 +177,10 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		catch (Exception exception) when (exception is not OperationCanceledException)
 		{
 			// The write goes through the same gate as a poll, and a device that vanished while it was held
-			// surfaces here. The next read is what says whether anything survived.
-			return VariableWriteResult.Failed(Strings.Variables.Write.Failed());
+			// surfaces here. From the caller's side that is one thing, not two: the value was not applied
+			// and the sensor cannot be driven right now. The next read is what says whether anything
+			// survived, so a fifth status would only split one situation into two names.
+			return VariableWriteResult.Unavailable(Strings.Variables.Write.Unavailable());
 		}
 
 		return applied
@@ -196,7 +228,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	/// </remarks>
 	public ValueTask<VariableDefinition?> ResolveAsync(string localId, CancellationToken cancellationToken = default)
 	{
-		var interval = RefreshInterval;
+		var interval = HostRefreshInterval;
 		foreach (var variable in EagerVariables())
 		{
 			if (string.Equals(variable.Id, localId, StringComparison.Ordinal))
@@ -249,7 +281,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		}
 
 		var offset = ParseOffset(query.ContinuationToken);
-		var interval = RefreshInterval;
+		var interval = HostRefreshInterval;
 
 		if (!string.IsNullOrWhiteSpace(query.Search))
 		{
@@ -259,7 +291,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 
 		if (string.IsNullOrEmpty(query.ParentId))
 		{
-			return Page(table.Hardware, query.PageSize, offset, HardwareDefinition);
+			return Page(table.Hardware, query.PageSize, offset, node => HardwareDefinition(node, interval));
 		}
 
 		return table.TryGetHardware(query.ParentId, out var node)
@@ -349,13 +381,14 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		snapshot is not null
 		&& (!refresh || DateTimeOffset.UtcNow - snapshot.BuiltAt < CatalogLifetime);
 
-	private static VariableDefinition HardwareDefinition(SensorCatalogNode node) =>
+	private static VariableDefinition HardwareDefinition(SensorCatalogNode node, TimeSpan refreshInterval) =>
 		VariableDefinition.OnDemand(node.Id, VariableType.Numeric) with
 		{
 			Name = VariableNaming.Sanitize(node.Name),
 			DisplayName = LocalizedText.FromLiteral(node.Name),
 			IsContainer = true,
 			IsBindable = false,
+			RefreshInterval = refreshInterval,
 		};
 
 	/// <summary>
@@ -410,33 +443,83 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 			: 0;
 
 	/// <summary>
-	/// Reads the value a Slider wrote, however the host serialized it - a number, a string, or nothing at
-	/// all - and refuses anything that is not a finite number.
+	/// Reads the value a Slider wrote, however the host serialized it - a number, a JSON number, a string,
+	/// or nothing at all - and refuses anything that is not a finite number.
 	/// </summary>
+	/// <remarks>
+	/// The text path formats and parses with the invariant culture. The obvious
+	/// <c>value.ToString()</c> is culture-sensitive, so a string such as <c>"40,5"</c> would reach an
+	/// invariant parse as a thousands separator and become 405, which the write would then clamp to the
+	/// fan's maximum. Text that cannot be read unambiguously is refused instead.
+	/// </remarks>
 	private static bool TryReadNumber(object? value, out double number)
 	{
 		number = 0;
 
-		if (value is null)
+		switch (value)
 		{
-			return false;
-		}
+			case null:
+				return false;
+			case double wrote:
+				number = wrote;
+				break;
+			case float wrote:
+				number = wrote;
+				break;
+			case decimal wrote:
+				number = (double)wrote;
+				break;
+			case int wrote:
+				number = wrote;
+				break;
+			case long wrote:
+				number = wrote;
+				break;
+			case short wrote:
+				number = wrote;
+				break;
+			case sbyte wrote:
+				number = wrote;
+				break;
+			case byte wrote:
+				number = wrote;
+				break;
+			case uint wrote:
+				number = wrote;
+				break;
+			case ulong wrote:
+				number = wrote;
+				break;
+			case ushort wrote:
+				number = wrote;
+				break;
+			case JsonElement element:
+				if (element.ValueKind != JsonValueKind.Number || !element.TryGetDouble(out number))
+				{
+					return false;
+				}
 
-		try
-		{
-			number = value switch
-			{
-				double wrote => wrote,
-				float wrote => wrote,
-				int wrote => wrote,
-				long wrote => wrote,
-				decimal wrote => (double)wrote,
-				_ => Convert.ToDouble(value.ToString(), CultureInfo.InvariantCulture),
-			};
-		}
-		catch (Exception exception) when (exception is FormatException or InvalidCastException or OverflowException)
-		{
-			return false;
+				break;
+			case string text:
+				if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out number))
+				{
+					return false;
+				}
+
+				break;
+			case IFormattable formattable:
+				if (!double.TryParse(
+					formattable.ToString(null, CultureInfo.InvariantCulture),
+					NumberStyles.Float,
+					CultureInfo.InvariantCulture,
+					out number))
+				{
+					return false;
+				}
+
+				break;
+			default:
+				return false;
 		}
 
 		return double.IsFinite(number);

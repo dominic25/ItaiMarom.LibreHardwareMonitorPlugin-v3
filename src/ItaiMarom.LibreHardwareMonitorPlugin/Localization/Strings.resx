@@ -103,7 +103,4 @@
   <data name="Variables.Write.Unavailable" xml:space="preserve">
     <value>The sensor cannot be controlled right now. Fan control needs Macro Deck to run as administrator with the hardware driver loaded.</value>
   </data>
-  <data name="Variables.Write.Failed" xml:space="preserve">
-    <value>The hardware refused the new value.</value>
-  </data>
 </root>
