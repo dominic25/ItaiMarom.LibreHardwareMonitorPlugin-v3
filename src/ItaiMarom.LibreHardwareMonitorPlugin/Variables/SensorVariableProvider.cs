@@ -45,14 +45,32 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
 	}
 
+	/// <summary>
+	/// How often the loop reads the hardware, and therefore how often the host should read a variable.
+	/// </summary>
+	/// <remarks>
+	/// Read live rather than captured: the settings screen can change the polling rate at run time, and
+	/// the next definition the host asks for has to carry the new rate. Declaring it is what stops the
+	/// host from falling back to its own five-second default for an eager variable.
+	/// </remarks>
+	private TimeSpan RefreshInterval => _monitor.Options.PollingInterval;
+
 	/// <inheritdoc />
 	/// <remarks>
 	/// Empty until the plugin is configured or a Macro Deck 2 configuration has been migrated, and
 	/// <see cref="VariablesDependOnConfiguration"/> says so. The catalog is how a user reaches every other
-	/// sensor.
+	/// sensor. Each definition carries the loop's polling interval, because the host otherwise reads an
+	/// eager variable on its own five-second default and a widget would update slower than the hardware
+	/// is polled.
 	/// </remarks>
-	public IReadOnlyList<VariableDefinition> Variables =>
-		EagerVariables().Select(variable => variable.EagerDefinition()).ToArray();
+	public IReadOnlyList<VariableDefinition> Variables
+	{
+		get
+		{
+			var interval = RefreshInterval;
+			return EagerVariables().Select(variable => variable.EagerDefinition(interval)).ToArray();
+		}
+	}
 
 	/// <inheritdoc />
 	public bool VariablesDependOnConfiguration => true;
@@ -178,11 +196,12 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	/// </remarks>
 	public ValueTask<VariableDefinition?> ResolveAsync(string localId, CancellationToken cancellationToken = default)
 	{
+		var interval = RefreshInterval;
 		foreach (var variable in EagerVariables())
 		{
 			if (string.Equals(variable.Id, localId, StringComparison.Ordinal))
 			{
-				return new ValueTask<VariableDefinition?>(variable.EagerDefinition());
+				return new ValueTask<VariableDefinition?>(variable.EagerDefinition(interval));
 			}
 		}
 
@@ -196,10 +215,13 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		var table = Volatile.Read(ref _snapshot)?.Table;
 		if (table is not null && table.TryGetSensor(localId, out var sensor))
 		{
-			return new ValueTask<VariableDefinition?>(CatalogDefinition(sensor, localId, parentId: null));
+			return new ValueTask<VariableDefinition?>(CatalogDefinition(sensor, localId, parentId: null, interval));
 		}
 
-		return new ValueTask<VariableDefinition?>(VariableDefinition.OnDemand(localId, VariableType.Numeric));
+		// The sensor is not installed right now, but the binding survives - and it is polled at the
+		// configured rate so it starts reporting as soon as the hardware answers again.
+		return new ValueTask<VariableDefinition?>(
+			VariableDefinition.OnDemand(localId, VariableType.Numeric) with { RefreshInterval = interval });
 	}
 
 	/// <inheritdoc />
@@ -227,11 +249,12 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		}
 
 		var offset = ParseOffset(query.ContinuationToken);
+		var interval = RefreshInterval;
 
 		if (!string.IsNullOrWhiteSpace(query.Search))
 		{
 			var matches = table.Sensors.Where(entry => entry.Sensor.Matches(query.Search)).ToArray();
-			return Page(matches, query.PageSize, offset, entry => CatalogDefinition(entry.Sensor, entry.Id, entry.ParentId));
+			return Page(matches, query.PageSize, offset, entry => CatalogDefinition(entry.Sensor, entry.Id, entry.ParentId, interval));
 		}
 
 		if (string.IsNullOrEmpty(query.ParentId))
@@ -240,7 +263,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		}
 
 		return table.TryGetHardware(query.ParentId, out var node)
-			? Page(node.Entries, query.PageSize, offset, entry => CatalogDefinition(entry.Sensor, entry.Id, node.Id))
+			? Page(node.Entries, query.PageSize, offset, entry => CatalogDefinition(entry.Sensor, entry.Id, node.Id, interval))
 			: VariableCatalogPage.Empty;
 	}
 
@@ -250,7 +273,9 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	/// <summary>
 	/// The eager variables for the current selection, computed once per selection rather than once per
 	/// call. The two fields are not synchronized: a racing reader can only see a stale pairing, recompute
-	/// from the same selection, and store the same answer.
+	/// from the same selection, and store the same answer. Only the names are cached - the definitions are
+	/// built per call - so a changed polling interval is carried by the next definition without the cache
+	/// having to be rebuilt.
 	/// </summary>
 	private IReadOnlyList<SensorVariable> EagerVariables()
 	{
@@ -334,11 +359,18 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		};
 
 	/// <summary>
-	/// A catalog resource: on-demand, named the way a user already knows the sensor, and writable when the
-	/// hardware gave it a control.
+	/// A catalog resource: on-demand, named the way a user already knows the sensor, writable when the
+	/// hardware gave it a control, and polled at the loop's interval so a bound widget tracks the hardware.
 	/// </summary>
-	private static VariableDefinition CatalogDefinition(SensorIdentifier sensor, string resourceId, string? parentId) =>
-		SensorDefinition.Describe(sensor, VariableDefinition.OnDemand(resourceId, VariableType.Numeric)) with
+	private static VariableDefinition CatalogDefinition(
+		SensorIdentifier sensor,
+		string resourceId,
+		string? parentId,
+		TimeSpan refreshInterval) =>
+		SensorDefinition.Describe(
+			sensor,
+			VariableDefinition.OnDemand(resourceId, VariableType.Numeric),
+			refreshInterval) with
 		{
 			// The host re-derives and de-duplicates a catalog name anyway, so the plain Macro Deck 2 name is
 			// the best suggestion: it is what a user already knows the sensor as.

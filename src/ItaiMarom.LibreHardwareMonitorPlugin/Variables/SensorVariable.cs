@@ -16,10 +16,18 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 /// </param>
 public sealed record SensorVariable(SensorIdentifier Sensor, string Name, string Id)
 {
-	/// <summary>The eager definition the host registers for this variable.</summary>
-	public VariableDefinition EagerDefinition() => SensorDefinition.Describe(
+	/// <summary>
+	/// The eager definition the host registers for this variable, polled as often as the plugin reads the
+	/// hardware.
+	/// </summary>
+	/// <param name="refreshInterval">
+	/// How often the host should read the variable. It is the loop's configured polling interval, which
+	/// the host otherwise replaces with its own five-second default.
+	/// </param>
+	public VariableDefinition EagerDefinition(TimeSpan refreshInterval) => SensorDefinition.Describe(
 		Sensor,
-		VariableDefinition.Eager(Name, VariableType.Numeric)) with
+		VariableDefinition.Eager(Name, VariableType.Numeric),
+		refreshInterval) with
 	{
 		Id = Id,
 	};

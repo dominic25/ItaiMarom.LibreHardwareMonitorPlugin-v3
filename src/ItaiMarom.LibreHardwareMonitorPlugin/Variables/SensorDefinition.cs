@@ -11,8 +11,9 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 internal static class SensorDefinition
 {
 	/// <summary>
-	/// Fills in what a sensor says about itself: how to render it, what it is called, and - for a fan or
-	/// pump the library gave a control to - that the host may write to it.
+	/// Fills in what a sensor says about itself: how to render it, what it is called, how often the host
+	/// should read it, and - for a fan or pump the library gave a control to - that the host may write to
+	/// it.
 	/// </summary>
 	/// <remarks>
 	/// <para>
@@ -27,11 +28,28 @@ internal static class SensorDefinition
 	/// A sensor the walk found no control on declares nothing, so a graphics card's fan duty stays a
 	/// reading rather than a slider that answers "unavailable" when it is moved.
 	/// </para>
+	/// <para>
+	/// The refresh interval is not decoration: a definition that leaves it null is read on the host's own
+	/// five-second default, so a widget would keep showing a stale reading however fast the plugin's loop
+	/// runs. Declaring the loop's interval is what makes the configured polling rate visible in Macro Deck
+	/// instead of only inside this process.
+	/// </para>
 	/// </remarks>
-	public static VariableDefinition Describe(SensorIdentifier sensor, VariableDefinition definition)
+	public static VariableDefinition Describe(
+		SensorIdentifier sensor,
+		VariableDefinition definition,
+		TimeSpan refreshInterval)
 	{
 		ArgumentNullException.ThrowIfNull(sensor);
 		ArgumentNullException.ThrowIfNull(definition);
+
+		if (refreshInterval <= TimeSpan.Zero)
+		{
+			throw new ArgumentOutOfRangeException(
+				nameof(refreshInterval),
+				refreshInterval,
+				"The host needs a positive interval to poll at.");
+		}
 
 		return definition with
 		{
@@ -39,6 +57,7 @@ internal static class SensorDefinition
 			DecimalPlaces = SensorFormatting.DecimalPlaces(sensor.SensorType),
 			Unit = SensorFormatting.Unit(sensor.SensorType),
 			SemanticKind = SensorFormatting.SemanticKind(sensor.SensorType),
+			RefreshInterval = refreshInterval,
 			Write = sensor.Controllable ? new VariableWriteCapability { CommitOnRelease = true } : null,
 		};
 	}

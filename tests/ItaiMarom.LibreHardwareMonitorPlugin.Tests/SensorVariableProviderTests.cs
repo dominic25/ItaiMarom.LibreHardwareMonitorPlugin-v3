@@ -73,6 +73,73 @@ public sealed class SensorVariableProviderTests
 	}
 
 	[Test]
+	public async Task A_declared_sensor_is_polled_at_the_configured_rate()
+	{
+		await using var fixture = new Fixture();
+		var sensor = fixture.Add("CPU", "CPU Total", SensorType.Load);
+		fixture.Select(sensor);
+		fixture.Polling(TimeSpan.FromMilliseconds(750));
+
+		var definition = fixture.Provider.Variables.Single();
+
+		// A definition that said nothing here would be read on the host's own five-second default, so a
+		// widget would lag the hardware however fast the plugin's loop runs.
+		Assert.That(definition.RefreshInterval, Is.EqualTo(TimeSpan.FromMilliseconds(750)));
+	}
+
+	[Test]
+	public async Task Resolving_a_declared_sensor_uses_the_current_polling_rate()
+	{
+		await using var fixture = new Fixture();
+		var sensor = fixture.Add("CPU", "CPU Total", SensorType.Load);
+		fixture.Select(sensor);
+
+		// The settings screen can change the rate while the plugin is running, and the next definition has
+		// to carry the new one rather than a copy taken when the selection was last computed.
+		fixture.Polling(TimeSpan.FromMilliseconds(500));
+
+		var definition = await fixture.Provider.ResolveAsync(sensor.VariableId);
+
+		Assert.That(definition, Is.Not.Null);
+		Assert.That(definition!.RefreshInterval, Is.EqualTo(TimeSpan.FromMilliseconds(500)));
+	}
+
+	[Test]
+	public async Task A_catalog_sensor_is_polled_at_the_configured_rate()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1");
+		fixture.Polling(TimeSpan.FromMilliseconds(250));
+
+		var roots = await fixture.Provider.DiscoverAsync(new VariableCatalogQuery());
+		var motherboard = roots.Items.Single(item => item.Name == "motherboard");
+		var page = await fixture.Provider.DiscoverAsync(new VariableCatalogQuery { ParentId = motherboard.Id });
+
+		// Both the browse entry and the definition a restored binding resolves have to state the rate: the
+		// host reads the first to decide when to poll and the second when the binding is loaded.
+		var listed = page.Items.Single(item => item.ResolvedId == fan.ResourceId);
+		var resolved = await fixture.Provider.ResolveAsync(fan.ResourceId);
+
+		Assert.That(listed.RefreshInterval, Is.EqualTo(TimeSpan.FromMilliseconds(250)));
+		Assert.That(resolved, Is.Not.Null);
+		Assert.That(resolved!.RefreshInterval, Is.EqualTo(TimeSpan.FromMilliseconds(250)));
+	}
+
+	[Test]
+	public async Task Resolving_hardware_that_is_not_installed_still_declares_the_rate()
+	{
+		await using var fixture = new Fixture();
+		fixture.Polling(TimeSpan.FromMilliseconds(400));
+
+		// The binding outlives the hardware; polling it at the configured rate is what lets it start
+		// reporting as soon as the device answers again.
+		var definition = await fixture.Provider.ResolveAsync("/gpu-nvidia/0/temperature/0");
+
+		Assert.That(definition, Is.Not.Null);
+		Assert.That(definition!.RefreshInterval, Is.EqualTo(TimeSpan.FromMilliseconds(400)));
+	}
+
+	[Test]
 	public async Task A_sensor_that_is_no_longer_selected_stops_being_declared()
 	{
 		await using var fixture = new Fixture();
@@ -611,6 +678,10 @@ public sealed class SensorVariableProviderTests
 		}
 
 		public void Select(params SensorIdentifier[] sensors) => Selection.Replace(sensors);
+
+		/// <summary>Changes the loop's timing the way the settings screen does.</summary>
+		public void Polling(TimeSpan interval) =>
+			Monitor.SetOptions(Monitor.Options with { PollingInterval = interval });
 
 		/// <summary>Watches the selection, the way binding an eager variable does.</summary>
 		public void Watch() => Monitor.SetWatchedSensors(Selection.Sensors);

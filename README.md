@@ -113,6 +113,10 @@ a SMART query, so it is never touched from anything that serves the Macro Deck s
   Macro Deck request and its answer, and no lock is ever held across a call into the hardware library.
 - A reading older than `StaleAfter` is dropped, so a device that really went away stops reporting a value
   that is no longer true.
+- Every variable definition declares the loop's polling interval as its `RefreshInterval`, so Macro Deck
+  reads a widget's variable at the configured rate instead of falling back to its own five-second default.
+  The host polls its variables on a 250 ms tick, so that is the finest update a widget can see even when
+  the loop itself runs faster; the value is still whatever the last poll cached.
 
 ## How the variables are exposed
 
