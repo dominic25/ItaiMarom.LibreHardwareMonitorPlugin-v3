@@ -225,6 +225,11 @@ so the settings screen is the old dialog itself, served to the browser:
   rather than a position, so a refresh can only ever fill in the row it belongs to, and ticking a box,
   opening a branch or typing in the filter is never disturbed by one. A sensor with nothing to report -
   a stopped fan, a drive that is not answering - shows a dash, never a zero.
+- A fan or pump that can be driven carries a `controllable` badge after its name, and its tooltip says the
+  built-in Slider widget can write to it. Only a sensor the hardware library actually attached a software
+  control to is badged - it also creates `Control` sensors with no control behind them, on a graphics card's
+  fan duty for instance - so a badge means a Slider will move the fan, and no badge means the sensor only
+  reports.
 - When the readings that need the hardware library's kernel driver are out of reach - it is not installed,
   or Macro Deck is not running as an administrator - the window says so in a line under its heading, and
   the log says the same thing at the moment the hardware is opened. The line names the readings, says why

@@ -124,6 +124,10 @@ internal static class ClassicWindowPage
 		li label span:first-of-type { flex: 1; min-width: 0; }
 		li label .value { flex: none; color: var(--dim); font-variant-numeric: tabular-nums; }
 		li label .value.none { color: var(--missing); }
+		li label .writable {
+			flex: none; padding: 1px 7px; border: 1px solid var(--accent); border-radius: 999px;
+			color: #a9c6ff; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+		}
 		footer {
 			display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
 			padding: 14px 22px; background: var(--panel); border-top: 1px solid var(--line);
@@ -150,7 +154,7 @@ internal static class ClassicWindowPage
 		<form method="post" action="__ACTION__" autocomplete="off">
 			<header>
 				<h1>__TITLE__</h1>
-				<p>Tick the sensors to publish as Macro Deck variables. Either way, every sensor shows what it is reporting right now, so a reading that never moves can be left alone. Anything you leave out stays reachable from the variable catalog, and the variable names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working.</p>
+				<p>Tick the sensors to publish as Macro Deck variables. Either way, every sensor shows what it is reporting right now, so a reading that never moves can be left alone. Anything you leave out stays reachable from the variable catalog, and the variable names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working. A sensor marked <strong>controllable</strong> can then be driven by Macro Deck's Slider widget.</p>
 		__NOTICE__
 			</header>
 
@@ -401,6 +405,11 @@ internal static class ClassicWindowPage
 	/// which is the text the old plugin also built its variable names from. The tick box carries the
 	/// identity, so this is what comes back from the window.
 	/// </summary>
+	/// <remarks>
+	/// A sensor the hardware library gave a software control carries a badge. Without one a user cannot
+	/// tell it apart from the fan's RPM sensor beside it, and would bind a Slider to a reading that only
+	/// ever moves.
+	/// </remarks>
 	private static void AppendSensor(
 		StringBuilder builder,
 		SensorIdentifier sensor,
@@ -413,8 +422,15 @@ internal static class ClassicWindowPage
 			.Append(ticked ? " checked" : string.Empty)
 			.Append("><span>")
 			.Append(WebUtility.HtmlEncode(sensor.LegacyToken))
-			.Append("</span>")
-			.Append(ValueCell(sensor, values))
+			.Append("</span>");
+
+		if (sensor.Controllable)
+		{
+			builder.Append(
+				"<span class=\"writable\" title=\"This sensor has a software control and can be driven by the built-in Slider widget.\">controllable</span>");
+		}
+
+		builder.Append(ValueCell(sensor, values))
 			.Append("</label></li>\n");
 	}
 

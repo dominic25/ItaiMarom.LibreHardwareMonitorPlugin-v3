@@ -82,6 +82,27 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task The_tree_marks_the_sensors_a_slider_can_drive()
+	{
+		// The control a Slider can write sits beside the fan's own RPM sensor under the same super-I/O
+		// chip, and the library also creates Control sensors it attaches no control to. Only the one with
+		// a real software control earns the badge.
+		var controllable = TestFanActions.Control("Fan #1") with { Controllable = true };
+		var readingOnly = TestFanActions.Control("Fan #2");
+		var rpm = TestSensor.Create("Motherboard", "Fan #1", SensorType.Fan, subHardwareName: "Nuvoton NCT6798D");
+
+		var page = await WindowClient.ReadPageAsync(Open([controllable, readingOnly, rpm], controllable).PageUri);
+
+		Assert.That(
+			page,
+			Does.Contain(
+				$"value=\"{controllable.ResourceId}\" checked><span>Fan #1_Control</span><span class=\"writable\"" +
+				" title=\"This sensor has a software control and can be driven by the built-in Slider widget.\">controllable</span>"));
+		Assert.That(page, Does.Contain("value=\"" + readingOnly.ResourceId + "\"><span>Fan #2_Control</span><span class=\"value"));
+		Assert.That(Occurrences(page, "class=\"writable\""), Is.EqualTo(1));
+	}
+
+	[Test]
 	public async Task The_tree_keeps_the_order_the_hardware_reported()
 	{
 		// Reported in an order that is neither the alphabetical one nor the one a stable sort by name
