@@ -79,27 +79,49 @@ public sealed class ClassicWindowServerTests
 
 		// Nothing is left of the markers the page is written with, so every piece of it was filled in.
 		Assert.That(page, Does.Not.Contain("__"));
+
+		// None of these sensors has a control, so nothing in the tree claims one.
+		Assert.That(page, Does.Not.Contain("class=\"contains\""));
+		Assert.That(page, Does.Not.Contain("class=\"readonly\""));
 	}
 
 	[Test]
-	public async Task The_tree_marks_the_sensors_a_slider_can_drive()
+	public async Task The_tree_marks_what_a_slider_can_drive_and_the_branches_above_it()
 	{
 		// The control a Slider can write sits beside the fan's own RPM sensor under the same super-I/O
 		// chip, and the library also creates Control sensors it attaches no control to. Only the one with
-		// a real software control earns the badge.
+		// a real software control earns the sensor's badge.
 		var controllable = TestFanActions.Control("Fan #1") with { Controllable = true };
 		var readingOnly = TestFanActions.Control("Fan #2");
 		var rpm = TestSensor.Create("Motherboard", "Fan #1", SensorType.Fan, subHardwareName: "Nuvoton NCT6798D");
+		var cpu = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
 
-		var page = await WindowClient.ReadPageAsync(Open([controllable, readingOnly, rpm], controllable).PageUri);
+		var page = await WindowClient.ReadPageAsync(Open([controllable, readingOnly, rpm, cpu], controllable).PageUri);
 
 		Assert.That(
 			page,
 			Does.Contain(
 				$"value=\"{controllable.ResourceId}\" checked><span>Fan #1_Control</span><span class=\"writable\"" +
 				" title=\"This sensor has a software control and can be driven by the built-in Slider widget.\">controllable</span>"));
-		Assert.That(page, Does.Contain("value=\"" + readingOnly.ResourceId + "\"><span>Fan #2_Control</span><span class=\"value"));
 		Assert.That(Occurrences(page, "class=\"writable\""), Is.EqualTo(1));
+
+		// A Control sensor the library attached nothing to says so, rather than looking badge-less by
+		// mistake: it is the one thing in the tree that a user could reasonably expect to be writable.
+		Assert.That(
+			page,
+			Does.Contain(
+				$"value=\"{readingOnly.ResourceId}\"><span>Fan #2_Control</span><span class=\"readonly\"" +
+				" title=\"This is a control sensor, but the hardware library attached no software control to it, so it can only be watched.\">read-only</span>"));
+
+		// The super-I/O chip's node and the Control branch are the ancestors of the writable sensor, so
+		// both say a control is below them - with the branch marker, not the sensor's.
+		Assert.That(page, Does.Contain("<span class=\"name root\">Motherboard</span><span class=\"contains\""));
+		Assert.That(page, Does.Contain("<span class=\"name kind\">Control</span><span class=\"contains\""));
+		Assert.That(Occurrences(page, "class=\"contains\""), Is.EqualTo(2));
+
+		// A branch with no control under it, and the root of another device, stay unmarked.
+		Assert.That(page, Does.Not.Contain("<span class=\"name kind\">Fan</span><span class=\"contains\""));
+		Assert.That(page, Does.Not.Contain("<span class=\"name root\">CPU</span><span class=\"contains\""));
 	}
 
 	[Test]

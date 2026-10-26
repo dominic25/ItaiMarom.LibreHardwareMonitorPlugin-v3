@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using LibreHardwareMonitor.Hardware;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 
@@ -124,10 +125,13 @@ internal static class ClassicWindowPage
 		li label span:first-of-type { flex: 1; min-width: 0; }
 		li label .value { flex: none; color: var(--dim); font-variant-numeric: tabular-nums; }
 		li label .value.none { color: var(--missing); }
-		li label .writable {
-			flex: none; padding: 1px 7px; border: 1px solid var(--accent); border-radius: 999px;
-			color: #a9c6ff; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+		li label .writable, summary .contains, li label .readonly {
+			flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
+			letter-spacing: .02em;
 		}
+		li label .writable { border: 1px solid var(--accent); color: #a9c6ff; }
+		summary .contains { border: 1px dashed var(--accent); color: var(--accent); }
+		li label .readonly { border: 1px solid var(--line); color: var(--missing); font-weight: 500; }
 		footer {
 			display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
 			padding: 14px 22px; background: var(--panel); border-top: 1px solid var(--line);
@@ -154,7 +158,7 @@ internal static class ClassicWindowPage
 		<form method="post" action="__ACTION__" autocomplete="off">
 			<header>
 				<h1>__TITLE__</h1>
-				<p>Tick the sensors to publish as Macro Deck variables. Either way, every sensor shows what it is reporting right now, so a reading that never moves can be left alone. Anything you leave out stays reachable from the variable catalog, and the variable names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working. A sensor marked <strong>controllable</strong> can then be driven by Macro Deck's Slider widget.</p>
+				<p>Tick the sensors to publish as Macro Deck variables. Either way, every sensor shows what it is reporting right now, so a reading that never moves can be left alone. Anything you leave out stays reachable from the variable catalog, and the variable names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working. A sensor marked <strong>controllable</strong> can then be driven by Macro Deck's Slider widget; a branch marked <strong>control below</strong> is where one of those sensors is.</p>
 		__NOTICE__
 			</header>
 
@@ -361,13 +365,25 @@ internal static class ClassicWindowPage
 			var rootSensors = root.SelectMany(category => category.Sensors).ToArray();
 			var rootTicked = rootSensors.Count(sensor => selected.Contains(sensor.ResourceId));
 
-			AppendOpen(builder, "root", root.Key, rootTicked, rootSensors.Length);
+			AppendOpen(
+				builder,
+				"root",
+				root.Key,
+				rootTicked,
+				rootSensors.Length,
+				rootSensors.Any(sensor => sensor.Controllable));
 
 			foreach (var category in root)
 			{
 				var kindTicked = category.Sensors.Count(sensor => selected.Contains(sensor.ResourceId));
 
-				AppendOpen(builder, "kind", category.TypeName, kindTicked, category.Sensors.Count);
+				AppendOpen(
+					builder,
+					"kind",
+					category.TypeName,
+					kindTicked,
+					category.Sensors.Count,
+					category.Sensors.Any(sensor => sensor.Controllable));
 
 				builder.Append("\t\t\t<ul>\n");
 				foreach (var sensor in category.Sensors)
@@ -384,8 +400,22 @@ internal static class ClassicWindowPage
 		return builder.ToString();
 	}
 
-	/// <summary>A branch's own row: a tick box that is not submitted, its name, and how much of it is on.</summary>
-	private static void AppendOpen(StringBuilder builder, string kind, string name, int ticked, int count)
+	/// <summary>
+	/// A branch's own row: a tick box that is not submitted, its name, whether a control hides below it,
+	/// and how much of it is on.
+	/// </summary>
+	/// <remarks>
+	/// The marker on a branch is deliberately not the one a sensor carries. A branch cannot be driven; it
+	/// only says that one of the sensors under it can be, so a collapsed hardware or reading kind still
+	/// tells the user where to look without claiming the branch itself is writable.
+	/// </remarks>
+	private static void AppendOpen(
+		StringBuilder builder,
+		string kind,
+		string name,
+		int ticked,
+		int count,
+		bool containsControl)
 	{
 		builder.Append(ticked > 0 ? "\t<details open>\n" : "\t<details>\n")
 			.Append("\t\t<summary><input type=\"checkbox\">")
@@ -393,7 +423,15 @@ internal static class ClassicWindowPage
 			.Append(kind)
 			.Append("\">")
 			.Append(WebUtility.HtmlEncode(name))
-			.Append("</span><span class=\"count\">")
+			.Append("</span>");
+
+		if (containsControl)
+		{
+			builder.Append(
+				"<span class=\"contains\" title=\"A sensor below can be driven by the built-in Slider widget.\">control below</span>");
+		}
+
+		builder.Append("<span class=\"count\">")
 			.Append(ticked.ToString(CultureInfo.InvariantCulture))
 			.Append('/')
 			.Append(count.ToString(CultureInfo.InvariantCulture))
@@ -408,7 +446,9 @@ internal static class ClassicWindowPage
 	/// <remarks>
 	/// A sensor the hardware library gave a software control carries a badge. Without one a user cannot
 	/// tell it apart from the fan's RPM sensor beside it, and would bind a Slider to a reading that only
-	/// ever moves.
+	/// ever moves. A <see cref="SensorType.Control"/> sensor with no control behind it says so instead:
+	/// the library creates those too - for a graphics card's fan duty, or a chip it can read but not
+	/// drive - and an unexplained missing badge would read as a bug.
 	/// </remarks>
 	private static void AppendSensor(
 		StringBuilder builder,
@@ -428,6 +468,11 @@ internal static class ClassicWindowPage
 		{
 			builder.Append(
 				"<span class=\"writable\" title=\"This sensor has a software control and can be driven by the built-in Slider widget.\">controllable</span>");
+		}
+		else if (sensor.SensorType == SensorType.Control)
+		{
+			builder.Append(
+				"<span class=\"readonly\" title=\"This is a control sensor, but the hardware library attached no software control to it, so it can only be watched.\">read-only</span>");
 		}
 
 		builder.Append(ValueCell(sensor, values))
