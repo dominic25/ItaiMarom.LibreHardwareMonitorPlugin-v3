@@ -1,9 +1,9 @@
 {
   "$schema": "https://schemas.macro-deck.app/plugin-manifest-v1.schema.json",
   "manifestVersion": 1,
-  "id": "com.itaimarom.libre-hardware-monitor-test",
-  "name": "Libre Hardware Monitor Plugin (Test)",
-  "version": "1.0.0",
+  "id": "com.itaimarom.libre-hardware-monitor",
+  "name": "Libre Hardware Monitor Plugin",
+  "version": "1.1.0",
   "description": "Reads CPU, GPU, memory, motherboard, storage and network sensors from LibreHardwareMonitor and exposes them as Macro Deck variables, with no separate monitoring application running. Also sets controllable fan and pump speeds.",
   "icon": "Assets/icon.svg",
   "entrypoints": {
