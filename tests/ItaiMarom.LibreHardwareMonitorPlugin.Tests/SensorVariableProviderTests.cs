@@ -88,6 +88,159 @@ public sealed class SensorVariableProviderTests
 	}
 
 	[Test]
+	public async Task A_sensor_the_hardware_gave_a_control_is_declared_writable()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1");
+		fixture.Select(fan);
+
+		var definition = fixture.Provider.Variables.Single();
+
+		Assert.That(definition.CanWrite, Is.True);
+		Assert.That(definition.Write, Is.Not.Null);
+		Assert.That(definition.Write!.CommitOnRelease, Is.True);
+	}
+
+	[Test]
+	public async Task A_sensor_without_a_control_is_declared_read_only()
+	{
+		await using var fixture = new Fixture();
+		var load = fixture.Add("CPU", "CPU Total", SensorType.Load, 42f);
+		fixture.Select(load);
+
+		var definition = fixture.Provider.Variables.Single();
+
+		Assert.That(definition.CanWrite, Is.False);
+		Assert.That(definition.Write, Is.Null);
+	}
+
+	[Test]
+	public async Task A_writable_sensor_reads_with_the_range_its_control_reports()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1", min: 20f, max: 80f, value: 50f);
+		fixture.Select(fan);
+		fixture.Watch();
+		fixture.Start();
+		await WaitUntilAsync(() => fixture.Monitor.TryGetReading(fan, out _));
+
+		// A bound Slider takes its track from the reading, so the chip's own range has to travel with the
+		// value rather than being assumed to be 0-100.
+		Assert.That(
+			await fixture.Provider.ReadAsync(fan.VariableId),
+			Is.EqualTo(VariableReading.Of(50d, 20d, 80d, 1d)));
+	}
+
+	[Test]
+	public async Task Writing_a_writable_sensor_moves_the_hardware()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1", value: 50f);
+		fixture.Select(fan);
+		fixture.Watch();
+		fixture.Start();
+		await WaitUntilAsync(() => fixture.Monitor.TryGetReading(fan, out _));
+
+		var result = await fixture.Provider.SetValueAsync(fan.VariableId, 40d);
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.Applied));
+		Assert.That(fixture.Source.LastSetSensorId, Is.EqualTo(fan.Id));
+		Assert.That(fixture.Source.LastSetValue, Is.EqualTo(40f).Within(0.001f));
+
+		// The write is followed by a read of the hardware, not by an echo of what was written.
+		await WaitUntilAsync(async () => await fixture.Provider.ReadAsync(fan.VariableId) == VariableReading.Of(40d, 0d, 100d, 1d));
+	}
+
+	[Test]
+	public async Task A_write_is_held_to_the_control_s_own_range()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1", min: 20f, max: 80f, value: 50f);
+		fixture.Select(fan);
+		fixture.Watch();
+		fixture.Start();
+		await WaitUntilAsync(() => fixture.Monitor.TryGetReading(fan, out _));
+
+		var result = await fixture.Provider.SetValueAsync(fan.VariableId, 5d);
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.Applied));
+		Assert.That(fixture.Source.LastSetValue, Is.EqualTo(20f).Within(0.001f));
+		await WaitUntilAsync(async () => await fixture.Provider.ReadAsync(fan.VariableId) == VariableReading.Of(20d, 20d, 80d, 1d));
+	}
+
+	[Test]
+	public async Task A_value_that_is_not_a_number_is_refused_without_writing()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1");
+		fixture.Select(fan);
+
+		var result = await fixture.Provider.SetValueAsync(fan.VariableId, "full");
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.InvalidValue));
+		Assert.That(fixture.Source.LastSetSensorId, Is.Null);
+	}
+
+	[Test]
+	public async Task Writing_an_id_nothing_knows_about_answers_not_found()
+	{
+		await using var fixture = new Fixture();
+
+		var result = await fixture.Provider.SetValueAsync("not_a_variable", 40d);
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.NotFound));
+	}
+
+	[Test]
+	public async Task Writing_a_read_only_sensor_is_refused_without_writing()
+	{
+		await using var fixture = new Fixture();
+		var load = fixture.Add("CPU", "CPU Total", SensorType.Load, 42f);
+		fixture.Select(load);
+
+		var result = await fixture.Provider.SetValueAsync(load.VariableId, 40d);
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.Unavailable));
+		Assert.That(fixture.Source.LastSetSensorId, Is.Null);
+	}
+
+	[Test]
+	public async Task Writing_a_sensor_whose_control_went_away_answers_unavailable()
+	{
+		await using var fixture = new Fixture();
+
+		// The selection remembers the capability, but this process found no control to write through.
+		var fan = TestFanActions.Control("Fan #1") with { Controllable = true };
+		fixture.Source.Add(fan, 50f);
+		fixture.Select(fan);
+
+		var result = await fixture.Provider.SetValueAsync(fan.VariableId, 40d);
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.Unavailable));
+		Assert.That(fixture.Source.LastSetSensorId, Is.Null);
+	}
+
+	[Test]
+	public async Task The_catalog_marks_the_sensors_it_can_write()
+	{
+		await using var fixture = new Fixture();
+		var fan = fixture.AddControl("Fan #1");
+		fixture.Add("Motherboard", "3VSB", SensorType.Voltage);
+
+		var roots = await fixture.Provider.DiscoverAsync(new VariableCatalogQuery());
+		var motherboard = roots.Items.Single(item => item.Name == "motherboard");
+		var page = await fixture.Provider.DiscoverAsync(new VariableCatalogQuery { ParentId = motherboard.Id });
+
+		var fanDefinition = page.Items.Single(item => item.ResolvedId == fan.ResourceId);
+		var voltageDefinition = page.Items.Single(item => item.Name == "v_3vsb_voltage");
+
+		Assert.That(fanDefinition.CanWrite, Is.True);
+		Assert.That(fanDefinition.Write!.CommitOnRelease, Is.True);
+		Assert.That(voltageDefinition.CanWrite, Is.False);
+		Assert.That(voltageDefinition.Write, Is.Null);
+	}
+
+	[Test]
 	public async Task A_declared_sensor_reads_the_value_the_loop_cached()
 	{
 		await using var fixture = new Fixture();
@@ -442,6 +595,18 @@ public sealed class SensorVariableProviderTests
 		{
 			var sensor = TestSensor.Create(hardwareName, sensorName, sensorType, subHardwareName);
 			Source.Add(sensor, value);
+			return sensor;
+		}
+
+		/// <summary>Adds a fan or pump with a software control, marked the way the live walk marks it.</summary>
+		public SensorIdentifier AddControl(
+			string sensorName = "Fan #1",
+			float min = 0f,
+			float max = 100f,
+			float value = 0f)
+		{
+			var sensor = TestFanActions.Control(sensorName) with { Controllable = true };
+			Source.AddControl(sensor, min, max, value);
 			return sensor;
 		}
 

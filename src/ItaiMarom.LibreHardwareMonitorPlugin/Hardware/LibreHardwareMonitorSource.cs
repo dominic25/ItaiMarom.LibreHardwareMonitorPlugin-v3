@@ -53,7 +53,7 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 
 			foreach (var (sensor, native) in Walk(hardware, RootOf(hardware)))
 			{
-				sensors.Add(new HardwareSensor(sensor, native.Value));
+				sensors.Add(new HardwareSensor(sensor, native.Value, Range(native)));
 			}
 		}
 
@@ -112,6 +112,16 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 	private static HardwareLocation RootOf(IHardware hardware) =>
 		HardwareLocation.Root(hardware.Identifier.ToString(), hardware.Name);
 
+	/// <summary>
+	/// The span a sensor's control accepts, or null when the library gave it no control. The chip owns the
+	/// range, so it is read here rather than assumed: the plugin asks in percentages and the library holds
+	/// the request to these same numbers.
+	/// </summary>
+	private static ControlRange? Range(ISensor sensor) =>
+		sensor.Control is { } control
+			? new ControlRange(control.MinSoftwareValue, control.MaxSoftwareValue)
+			: null;
+
 	/// <summary>Updates one piece of hardware and everything below it, because it does not do that itself.</summary>
 	private static void Update(IHardware hardware)
 	{
@@ -138,7 +148,10 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 				location,
 				sensor.Identifier.ToString(),
 				sensor.Name,
-				sensor.SensorType), sensor);
+				sensor.SensorType)
+			{
+				Controllable = sensor.Control is not null,
+			}, sensor);
 		}
 
 		foreach (var subHardware in hardware.SubHardware)

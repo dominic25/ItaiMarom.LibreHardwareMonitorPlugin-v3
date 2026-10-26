@@ -64,6 +64,11 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	/// Adds a control the action can drive. The sensor does not have to be in the read set: a control
 	/// sensor is present whether or not anything watches its reading.
 	/// </summary>
+	/// <remarks>
+	/// The real hardware walk marks a sensor controllable when it finds an <c>IControl</c> attached, so
+	/// adding a fake control marks the sensor the same way - and adds it to the read set when it was not
+	/// there, because a control a catalog cannot see is a fan no variable can offer.
+	/// </remarks>
 	public FakeHardwareSensorSource AddControl(
 		SensorIdentifier sensor,
 		float min = 0f,
@@ -72,6 +77,18 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 		ControlMode mode = ControlMode.Undefined)
 	{
 		_controls[sensor] = new FakeControl(min, max, value, mode);
+
+		var controllable = sensor with { Controllable = true };
+		var index = _entries.FindIndex(entry => entry.Sensor == sensor);
+		if (index < 0)
+		{
+			_entries.Add(new Entry(controllable, value));
+		}
+		else
+		{
+			_entries[index] = _entries[index] with { Sensor = controllable };
+		}
+
 		return this;
 	}
 
@@ -84,7 +101,7 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 			throw new InvalidOperationException($"No such sensor: {sensor.Id}.");
 		}
 
-		_entries[index] = new Entry(sensor, value);
+		_entries[index] = _entries[index] with { Value = value };
 		return this;
 	}
 
@@ -115,7 +132,7 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 
 		return _entries
 			.Where(entry => filter is null || filter.Contains(entry.Sensor.RootHardwareName))
-			.Select(entry => new HardwareSensor(entry.Sensor, entry.Value))
+			.Select(Sample)
 			.ToArray();
 	}
 
@@ -175,6 +192,23 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 		}
 
 		return (null, default);
+	}
+
+	/// <summary>
+	/// One sample: a sensor with a control carries its range, and a software-controlled one reports the
+	/// value that was written to it - which is how the library's own control sensor behaves.
+	/// </summary>
+	private HardwareSensor Sample(Entry entry)
+	{
+		if (!_controls.TryGetValue(entry.Sensor, out var control))
+		{
+			return new HardwareSensor(entry.Sensor, entry.Value);
+		}
+
+		return new HardwareSensor(
+			entry.Sensor,
+			control.Mode == ControlMode.Software ? control.SoftwareValue : entry.Value,
+			new ControlRange(control.MinSoftwareValue, control.MaxSoftwareValue));
 	}
 
 	private sealed record Entry(SensorIdentifier Sensor, float? Value);

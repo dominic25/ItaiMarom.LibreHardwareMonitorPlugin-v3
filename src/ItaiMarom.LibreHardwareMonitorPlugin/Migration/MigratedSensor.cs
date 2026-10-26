@@ -19,6 +19,12 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 /// Every member is nullable because this is deserialized from text the host has held across upgrades: a
 /// document that is missing a field must be rejected, not thrown over.
 /// </para>
+/// <para>
+/// <see cref="Controllable"/> is stored for the same reason as the identity: the host asks what variables
+/// exist before anything has been enumerated, so a fan that should be writable has to say so from the
+/// document alone. A document from before this field existed leaves it null, which reads as read-only -
+/// the safe answer, and the one that costs only a writable fan until the sensor is picked again.
+/// </para>
 /// </remarks>
 public sealed record MigratedSensor(
 	string? Sensor,
@@ -28,7 +34,8 @@ public sealed record MigratedSensor(
 	string? HardwareName,
 	string? HardwarePath,
 	string? RootHardware,
-	string? RootHardwareName)
+	string? RootHardwareName,
+	bool? Controllable = null)
 {
 	/// <summary>Flattens a sensor into the stored shape.</summary>
 	public static MigratedSensor From(SensorIdentifier sensor)
@@ -43,7 +50,8 @@ public sealed record MigratedSensor(
 			sensor.Hardware.Name,
 			sensor.Hardware.Path,
 			sensor.Hardware.RootId,
-			sensor.Hardware.RootName);
+			sensor.Hardware.RootName,
+			sensor.Controllable);
 	}
 
 	/// <summary>
@@ -74,7 +82,10 @@ public sealed record MigratedSensor(
 			new HardwareLocation(Hardware, HardwareName, path, RootHardware, RootHardwareName),
 			Sensor,
 			SensorName,
-			kind);
+			kind)
+		{
+			Controllable = Controllable ?? false,
+		};
 
 		return true;
 	}

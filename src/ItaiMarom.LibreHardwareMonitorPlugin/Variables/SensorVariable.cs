@@ -1,5 +1,4 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
-using MacroDeck.Localization;
 using MacroDeck.Sdk.Variables;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Variables;
@@ -18,14 +17,10 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 public sealed record SensorVariable(SensorIdentifier Sensor, string Name, string Id)
 {
 	/// <summary>The eager definition the host registers for this variable.</summary>
-	public VariableDefinition EagerDefinition() => VariableDefinition.Eager(
-		Name,
-		VariableType.Numeric,
-		SensorFormatting.DecimalPlaces(Sensor.SensorType)) with
+	public VariableDefinition EagerDefinition() => SensorDefinition.Describe(
+		Sensor,
+		VariableDefinition.Eager(Name, VariableType.Numeric)) with
 	{
 		Id = Id,
-		Unit = SensorFormatting.Unit(Sensor.SensorType),
-		SemanticKind = SensorFormatting.SemanticKind(Sensor.SensorType),
-		DisplayName = LocalizedText.FromLiteral(Sensor.DisplayName),
 	};
 }

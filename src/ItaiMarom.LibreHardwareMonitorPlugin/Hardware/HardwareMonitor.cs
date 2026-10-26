@@ -186,18 +186,30 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	}
 
 	/// <summary>Reads the newest value of one sensor, if the loop has a fresh one.</summary>
-	public bool TryGetReading(SensorIdentifier sensor, out double value)
+	public bool TryGetReading(SensorIdentifier sensor, out double value) =>
+		TryGetReading(sensor, out value, out _);
+
+	/// <summary>
+	/// Reads the newest value of one sensor and, when the sample carried one, the span its control accepts.
+	/// </summary>
+	/// <remarks>
+	/// One lookup rather than two: the range belongs to the same sample as the value, and fetching them
+	/// separately could answer with a value from one poll and a range from another.
+	/// </remarks>
+	public bool TryGetReading(SensorIdentifier sensor, out double value, out ControlRange? control)
 	{
 		lock (_sync)
 		{
 			if (_readings.TryGetValue(sensor, out var reading))
 			{
 				value = reading.Value;
+				control = reading.Control;
 				return true;
 			}
 		}
 
 		value = 0;
+		control = null;
 		return false;
 	}
 
@@ -377,7 +389,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 				// it, so a single null does not make a variable blink out and back within one interval.
 				if (sample.Value is { } value && _watched.Contains(sample.Sensor))
 				{
-					_readings[sample.Sensor] = new Reading(value, sampledAt);
+					_readings[sample.Sensor] = new Reading(value, sample.Control, sampledAt);
 				}
 			}
 
@@ -440,5 +452,5 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	}
 
 	/// <summary>One cached value and the moment the poll that produced it finished.</summary>
-	private readonly record struct Reading(double Value, DateTimeOffset SampledAt);
+	private readonly record struct Reading(double Value, ControlRange? Control, DateTimeOffset SampledAt);
 }

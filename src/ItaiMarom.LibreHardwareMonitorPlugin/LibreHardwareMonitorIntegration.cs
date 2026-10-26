@@ -65,6 +65,12 @@ public sealed class LibreHardwareMonitorIntegration :
 	private readonly ClassicWindowServer _window;
 	private readonly ILogger _logger;
 
+	/// <summary>
+	/// The host's variable surface, captured at initialize so a write can ask it to re-read a definition.
+	/// Null until the plugin has been initialized, which is also when there is no session to tell.
+	/// </summary>
+	private IVariableApi? _variableApi;
+
 	public LibreHardwareMonitorIntegration(
 		ILogger logger,
 		IHardwareSensorSource source,
@@ -128,6 +134,29 @@ public sealed class LibreHardwareMonitorIntegration :
 		_variables.ReadAsync(localId, cancellationToken);
 
 	/// <inheritdoc />
+	/// <remarks>
+	/// The write itself belongs to the provider. What this adds is the nudge the host does not give itself:
+	/// it does not echo a written value back to the widgets bound to it, so the definition has to be told
+	/// to read again or the Slider sits at the position the user dragged it to rather than at what the fan
+	/// actually accepted. The refresh is best effort - the write has already happened, and failing to
+	/// announce it must not turn an applied write into an error.
+	/// </remarks>
+	public async ValueTask<VariableWriteResult> SetValueAsync(
+		string localId,
+		object? value,
+		CancellationToken cancellationToken = default)
+	{
+		var result = await _variables.SetValueAsync(localId, value, cancellationToken).ConfigureAwait(false);
+
+		if (result.Status == VariableWriteStatus.Applied)
+		{
+			await RefreshDefinitionAsync(localId, cancellationToken).ConfigureAwait(false);
+		}
+
+		return result;
+	}
+
+	/// <inheritdoc />
 	public ValueTask<IReadOnlyList<VariableValue>> SubscribeAsync(
 		IReadOnlyCollection<string> localIds,
 		CancellationToken cancellationToken = default) =>
@@ -166,6 +195,8 @@ public sealed class LibreHardwareMonitorIntegration :
 	public async Task InitializeAsync(IIntegrationContext context)
 	{
 		ArgumentNullException.ThrowIfNull(context);
+
+		_variableApi = context.Variables;
 
 		// What the host holds is the whole of what this plugin is configured with, so it is read on every
 		// initialize rather than cached: an entry the user removed has to stop being a variable.
@@ -215,6 +246,37 @@ public sealed class LibreHardwareMonitorIntegration :
 		await _window.DisposeAsync().ConfigureAwait(false);
 		_variables.Dispose();
 		await _hardware.DisposeAsync().ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Asks the host to re-read one declaration after its value was written, so a bound Slider settles on
+	/// what the hardware accepted instead of on what was dragged.
+	/// </summary>
+	/// <remarks>
+	/// Best effort by design: a refresh is a notification, not part of the write. A session that has gone
+	/// away, or a cancellation that arrives after the fan has already moved, must not be reported as a
+	/// failed write - the next read is what says whether anything survived, and the log is the place for
+	/// the rest.
+	/// </remarks>
+	private async Task RefreshDefinitionAsync(string localId, CancellationToken cancellationToken)
+	{
+		if (_variableApi is not { } api)
+		{
+			return;
+		}
+
+		try
+		{
+			await api.RequestDefinitionRefreshAsync([localId], cancellationToken).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException)
+		{
+			// The value is already written; cancellation of the announcement changes nothing about it.
+		}
+		catch (Exception exception)
+		{
+			_logger.Debug(exception, "Could not announce the new value of {LocalId}.", localId);
+		}
 	}
 
 	/// <summary>

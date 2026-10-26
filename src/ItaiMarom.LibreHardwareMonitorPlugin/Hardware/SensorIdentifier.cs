@@ -135,4 +135,36 @@ public sealed record SensorIdentifier(
 			|| Hardware.RootName.Contains(search, StringComparison.OrdinalIgnoreCase)
 			|| Hardware.Path.Contains(search, StringComparison.OrdinalIgnoreCase);
 	}
+
+	/// <summary>
+	/// Whether the hardware library gives this sensor a software control, and so whether a fan or pump can
+	/// be driven rather than only watched.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Deliberately outside identity. A record's synthesized equality covers every instance field,
+	/// including the backing field of a property declared in the body, so <see cref="Equals(SensorIdentifier?)"/>
+	/// and <see cref="GetHashCode"/> are written out to compare only the four positional members. The
+	/// capability is a fact about what this process could load, not about the sensor: two identifiers for
+	/// one sensor have to keep comparing equal whether or not either was built from a live walk, or a
+	/// dictionary keyed by identity would split the moment a control appeared or went away.
+	/// </para>
+	/// <para>
+	/// The sensor's kind is no substitute for it: the library creates a <c>Control</c> sensor for a
+	/// graphics card's fan duty or a T-Balancer without attaching an <c>IControl</c> to it, so only what the
+	/// walk actually found is worth declaring writable.
+	/// </para>
+	/// </remarks>
+	public bool Controllable { get; init; }
+
+	/// <summary>Compares the four positional members, and deliberately not <see cref="Controllable"/>.</summary>
+	public bool Equals(SensorIdentifier? other) =>
+		other is not null
+		&& Hardware == other.Hardware
+		&& string.Equals(Id, other.Id, StringComparison.Ordinal)
+		&& string.Equals(SensorName, other.SensorName, StringComparison.Ordinal)
+		&& SensorType == other.SensorType;
+
+	/// <inheritdoc />
+	public override int GetHashCode() => HashCode.Combine(Hardware, Id, SensorName, SensorType);
 }

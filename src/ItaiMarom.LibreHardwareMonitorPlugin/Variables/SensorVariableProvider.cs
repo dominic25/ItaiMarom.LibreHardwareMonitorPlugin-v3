@@ -64,14 +64,78 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	public bool SupportsSearch => true;
 
 	/// <inheritdoc />
+	/// <remarks>
+	/// A read stays a dictionary lookup: the value comes from the loop's cache, and the range a fan's
+	/// control accepts comes with the same sample. A cancellation token has nowhere to go here on purpose -
+	/// answering from a dictionary is not work worth cancelling, and doing it synchronously is what keeps a
+	/// read off the session's critical path.
+	/// </remarks>
 	public ValueTask<VariableReading> ReadAsync(string localId, CancellationToken cancellationToken = default)
 	{
-		// A cancellation token has nowhere to go here on purpose: answering from a dictionary is not work
-		// worth cancelling, and doing it synchronously is what keeps a read off the session's critical path.
+		if (!TryResolveSensor(localId, out var sensor)
+			|| !_monitor.TryGetReading(sensor, out var value, out var control))
+		{
+			return new ValueTask<VariableReading>(VariableReading.Unavailable);
+		}
+
+		// A bound Slider takes its track from the reading rather than from the definition, so a fan's own
+		// span travels with its value. The step is one percent because that is the resolution of a chip's
+		// duty cycle: anything finer would be a position the hardware rounds away.
 		return new ValueTask<VariableReading>(
-			TryResolveSensor(localId, out var sensor) && _monitor.TryGetReading(sensor, out var value)
-				? VariableReading.Of(value)
-				: VariableReading.Unavailable);
+			control is { } range
+				? VariableReading.Of(value, range.Min, range.Max, 1)
+				: VariableReading.Of(value));
+	}
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// <para>
+	/// Only a sensor the hardware library gave a control to is writable, and the definition it was declared
+	/// under said so. The value is handed to the control without a second clamp: the hardware layer already
+	/// holds it inside the range the chip reports, and the read that follows - not this answer - is what the
+	/// host shows.
+	/// </para>
+	/// <para>
+	/// "Not writable" is deliberately never the answer. This provider only declares the capability for a
+	/// sensor that had one, so a write that arrives for a sensor without one is a control that went away,
+	/// and the honest report is that it cannot be written right now rather than that it never could.
+	/// </para>
+	/// </remarks>
+	public async ValueTask<VariableWriteResult> SetValueAsync(
+		string localId,
+		object? value,
+		CancellationToken cancellationToken = default)
+	{
+		if (!TryReadNumber(value, out var number))
+		{
+			return VariableWriteResult.InvalidValue(Strings.Variables.Write.InvalidValue());
+		}
+
+		if (!TryResolveSensor(localId, out var sensor))
+		{
+			return VariableWriteResult.NotFound(Strings.Variables.Write.NotFound());
+		}
+
+		if (!sensor.Controllable)
+		{
+			return VariableWriteResult.Unavailable(Strings.Variables.Write.Unavailable());
+		}
+
+		bool applied;
+		try
+		{
+			applied = await _monitor.SetControlAsync(sensor.Id, number, cancellationToken).ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is not OperationCanceledException)
+		{
+			// The write goes through the same gate as a poll, and a device that vanished while it was held
+			// surfaces here. The next read is what says whether anything survived.
+			return VariableWriteResult.Failed(Strings.Variables.Write.Failed());
+		}
+
+		return applied
+			? VariableWriteResult.Applied()
+			: VariableWriteResult.Unavailable(Strings.Variables.Write.Unavailable());
 	}
 
 	/// <inheritdoc />
@@ -132,7 +196,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		var table = Volatile.Read(ref _snapshot)?.Table;
 		if (table is not null && table.TryGetSensor(localId, out var sensor))
 		{
-			return new ValueTask<VariableDefinition?>(SensorDefinition(sensor, localId, parentId: null));
+			return new ValueTask<VariableDefinition?>(CatalogDefinition(sensor, localId, parentId: null));
 		}
 
 		return new ValueTask<VariableDefinition?>(VariableDefinition.OnDemand(localId, VariableType.Numeric));
@@ -167,7 +231,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		if (!string.IsNullOrWhiteSpace(query.Search))
 		{
 			var matches = table.Sensors.Where(entry => entry.Sensor.Matches(query.Search)).ToArray();
-			return Page(matches, query.PageSize, offset, entry => SensorDefinition(entry.Sensor, entry.Id, entry.ParentId));
+			return Page(matches, query.PageSize, offset, entry => CatalogDefinition(entry.Sensor, entry.Id, entry.ParentId));
 		}
 
 		if (string.IsNullOrEmpty(query.ParentId))
@@ -176,7 +240,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		}
 
 		return table.TryGetHardware(query.ParentId, out var node)
-			? Page(node.Entries, query.PageSize, offset, entry => SensorDefinition(entry.Sensor, entry.Id, node.Id))
+			? Page(node.Entries, query.PageSize, offset, entry => CatalogDefinition(entry.Sensor, entry.Id, node.Id))
 			: VariableCatalogPage.Empty;
 	}
 
@@ -269,16 +333,16 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 			IsBindable = false,
 		};
 
-	private static VariableDefinition SensorDefinition(SensorIdentifier sensor, string resourceId, string? parentId) =>
-		VariableDefinition.OnDemand(resourceId, VariableType.Numeric) with
+	/// <summary>
+	/// A catalog resource: on-demand, named the way a user already knows the sensor, and writable when the
+	/// hardware gave it a control.
+	/// </summary>
+	private static VariableDefinition CatalogDefinition(SensorIdentifier sensor, string resourceId, string? parentId) =>
+		SensorDefinition.Describe(sensor, VariableDefinition.OnDemand(resourceId, VariableType.Numeric)) with
 		{
 			// The host re-derives and de-duplicates a catalog name anyway, so the plain Macro Deck 2 name is
 			// the best suggestion: it is what a user already knows the sensor as.
 			Name = sensor.VariableName,
-			DisplayName = LocalizedText.FromLiteral(sensor.DisplayName),
-			DecimalPlaces = SensorFormatting.DecimalPlaces(sensor.SensorType),
-			Unit = SensorFormatting.Unit(sensor.SensorType),
-			SemanticKind = SensorFormatting.SemanticKind(sensor.SensorType),
 			ParentId = parentId,
 		};
 
@@ -312,6 +376,39 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		int.TryParse(continuationToken, NumberStyles.Integer, CultureInfo.InvariantCulture, out var offset) && offset > 0
 			? offset
 			: 0;
+
+	/// <summary>
+	/// Reads the value a Slider wrote, however the host serialized it - a number, a string, or nothing at
+	/// all - and refuses anything that is not a finite number.
+	/// </summary>
+	private static bool TryReadNumber(object? value, out double number)
+	{
+		number = 0;
+
+		if (value is null)
+		{
+			return false;
+		}
+
+		try
+		{
+			number = value switch
+			{
+				double wrote => wrote,
+				float wrote => wrote,
+				int wrote => wrote,
+				long wrote => wrote,
+				decimal wrote => (double)wrote,
+				_ => Convert.ToDouble(value.ToString(), CultureInfo.InvariantCulture),
+			};
+		}
+		catch (Exception exception) when (exception is FormatException or InvalidCastException or OverflowException)
+		{
+			return false;
+		}
+
+		return double.IsFinite(number);
+	}
 
 	private sealed record CatalogSnapshot(SensorCatalogTable Table, DateTimeOffset BuiltAt);
 }

@@ -75,6 +75,18 @@ public sealed class SensorIdentifierTests
 	}
 
 	[Test]
+	public void Whether_a_control_was_found_is_not_part_of_a_sensor_s_identity()
+	{
+		var sensor = TestSensor.Create("Motherboard", "Fan #1", SensorType.Control, subHardwareName: "Nuvoton NCT6798D");
+		var controllable = sensor with { Controllable = true };
+
+		// A dictionary keyed by identity must not split when a control appears or goes away, and a stored
+		// selection must still match the live sensor after the driver is or is not loaded.
+		Assert.That(controllable, Is.EqualTo(sensor));
+		Assert.That(controllable.GetHashCode(), Is.EqualTo(sensor.GetHashCode()));
+	}
+
+	[Test]
 	public void The_display_name_carries_the_kind_because_the_name_alone_is_ambiguous()
 	{
 		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);

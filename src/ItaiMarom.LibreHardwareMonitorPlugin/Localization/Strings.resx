@@ -94,4 +94,16 @@
   <data name="Actions.RestoreFanControl.Description" xml:space="preserve">
     <value>Hands a fan or pump back to the motherboard's own fan curve, undoing a speed set by software.</value>
   </data>
+  <data name="Variables.Write.InvalidValue" xml:space="preserve">
+    <value>The value is missing or not a number.</value>
+  </data>
+  <data name="Variables.Write.NotFound" xml:space="preserve">
+    <value>That sensor is no longer known to the plugin.</value>
+  </data>
+  <data name="Variables.Write.Unavailable" xml:space="preserve">
+    <value>The sensor cannot be controlled right now. Fan control needs Macro Deck to run as administrator with the hardware driver loaded.</value>
+  </data>
+  <data name="Variables.Write.Failed" xml:space="preserve">
+    <value>The hardware refused the new value.</value>
+  </data>
 </root>

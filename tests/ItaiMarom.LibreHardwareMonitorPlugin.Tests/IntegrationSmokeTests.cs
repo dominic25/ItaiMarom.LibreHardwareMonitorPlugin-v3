@@ -68,6 +68,35 @@ public sealed class IntegrationSmokeTests
 	}
 
 	[Test]
+	public async Task A_written_variable_is_announced_to_the_host()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var fan = TestFanActions.Control("Fan #1") with { Controllable = true };
+		var source = new FakeHardwareSensorSource().AddControl(fan, value: 50f);
+		await using var integration = new LibreHardwareMonitorIntegration(
+			logger,
+			source,
+			new SensorSelection(),
+			FakeAccessDiagnosis.Reachable(),
+			new RecordingCatalogNotifier());
+
+		var context = new FakeIntegrationContext();
+		MigrationTestData.SeedMigratedSensors(context.Config, fan);
+		await integration.InitializeAsync(context);
+
+		var definition = integration.Variables.Single();
+		var result = await integration.SetValueAsync(definition.ResolvedId!, 40d);
+
+		Assert.That(result.Status, Is.EqualTo(VariableWriteStatus.Applied));
+
+		// The host does not echo a written value back, so the integration has to tell it that the
+		// declaration's last value moved; otherwise a bound Slider stays where it was dragged to.
+		Assert.That(
+			context.Variables.DefinitionRefreshRequests,
+			Has.Some.EquivalentTo(new[] { definition.ResolvedId! }));
+	}
+
+	[Test]
 	public async Task Initializing_twice_and_shutting_down_twice_is_safe()
 	{
 		using var logger = new LoggerConfiguration().CreateLogger();

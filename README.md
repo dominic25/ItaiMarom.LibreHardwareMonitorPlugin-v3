@@ -17,7 +17,8 @@ Macro Deck 3 out-of-process rewrite of [ItaiMarom.LibreHardwareMonitorPlugin](ht
 Reads CPU, GPU, memory, motherboard, storage and network sensors through
 [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor), exposes them
 as Macro Deck variables - no separate monitoring application required - and offers actions that set a
-controllable fan or pump's speed or hand it back to the motherboard's own curve.
+controllable fan or pump's speed or hand it back to the motherboard's own curve. A controllable fan is
+also a writable variable, so the built-in Slider widget can drive it.
 
 ## What this is (and is not)
 
@@ -26,7 +27,8 @@ the host over the Macro Deck 3 plugin SDK. This repository is that app.
 
 The Macro Deck 2 plugin was a **pure variable provider** - it declared no actions. That is still the
 plugin's main job, and every variable it published keeps its old name. What is new is fan control: two
-actions that write to a controllable fan or pump through the same hardware library, because watching a
+actions that write to a controllable fan or pump through the same hardware library, and a writable
+variable for every sensor that has a control, so Macro Deck's built-in Slider can drive it. Watching a
 fan on a button and not being able to change it was the one thing the port could not express.
 
 ## Requirements
@@ -65,6 +67,7 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     SensorIdentifier.cs                stable sensor identity and variable naming
     SensorFormatting.cs                how a reading is presented (decimals, unit, semantic kind)
     HardwareSensor.cs                  one sample from a source
+    ControlRange.cs                    the span a sensor's software control accepts
   Actions/
     ControlAction.cs                   what the fan actions share: sensor picker, options, executor
     SetFanSpeedAction.cs               set a controllable fan or pump to a percentage
@@ -72,6 +75,7 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
   Variables/
     SensorSelection.cs                 the sensors that become declared variables
     SensorVariable.cs                  a selected sensor and the name/id it is exposed under
+    SensorDefinition.cs                the parts of a definition that come from the sensor
     SensorVariableNaming.cs            collision policy for names and declared ids
     SensorCatalogTable.cs              the hardware tree flattened for browsing
     SensorVariableProvider.cs          the IVariableProvider: reads, catalog, subscriptions
@@ -149,6 +153,12 @@ plugin therefore drives exactly the sensors that report one:
 - **Two actions.** **Set fan speed** takes a 0-100 slider and writes it as a software control; **Restore
   fan control** returns the same sensor to the hardware's own curve. The undo matters: a software value
   survives the plugin process, so without it a fan would keep a speed set once until the machine restarts.
+- **The same fans are writable variables.** A sensor with a control is declared with `Write`, so Macro
+  Deck's own **Slider** widget can bind to a declared variable or to a catalog binding and drive it
+  two-way. The reading carries the control's reported range and a one-percent step, the drag commits on
+  release rather than writing at every intermediate point, and after an applied write the plugin asks the
+  host to read the definition again so the slider settles on what the chip accepted. No plugin-specific
+  widget is involved.
 - **The fan list is built on demand.** The host reads `Actions` before it initializes the integration, so
   the definitions are constructed without touching hardware. `GetDynamicOptionsAsync` enumerates the
   controls only when the action editor opens the picker, and opens the hardware if the polling loop has

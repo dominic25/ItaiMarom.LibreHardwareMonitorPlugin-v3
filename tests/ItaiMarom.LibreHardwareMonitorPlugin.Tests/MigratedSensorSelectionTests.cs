@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 using LibreHardwareMonitor.Hardware;
@@ -44,6 +45,37 @@ public sealed class MigratedSensorSelectionTests
 		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
 
 		Assert.That(restored.Sensors, Is.EqualTo(new[] { CpuTotal }));
+	}
+
+	[Test]
+	public async Task A_controllable_sensor_is_still_controllable_after_a_round_trip()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		MigrationTestData.SeedMigratedSensors(config, CpuTotal with { Controllable = true });
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		// The host asks what variables exist before anything is enumerated, so a fan that should be
+		// writable has to say so from the stored document alone.
+		Assert.That(restored.Sensors.Single().Controllable, Is.True);
+	}
+
+	[Test]
+	public async Task A_document_from_before_control_was_recorded_reads_as_read_only()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+
+		var stored = new MigratedSensorSelection([CpuTotal], null).ToValues()[MigratedSensorSelection.SensorsKey].GetString()!;
+		var document = JsonNode.Parse(stored)!.AsArray();
+		document[0]!.AsObject().Remove(nameof(MigratedSensor.Controllable));
+		config.SeedString(entry, MigratedSensorSelection.SensorsKey, document.ToJsonString());
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.Sensors.Single().Controllable, Is.False);
 	}
 
 	[Test]
