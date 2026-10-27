@@ -1,3 +1,6 @@
+<img width="3168" height="1344" alt="Gemini_Generated_Image_emuivyemuivyemui" src="https://github.com/user-attachments/assets/956601e3-ee55-4be2-b688-063d2e1f1723" />
+
+
 # ItaiMarom.LibreHardwareMonitorPlugin-v3
 
 Reads the CPU, GPU, memory, motherboard, storage and network sensors of a Windows machine through
