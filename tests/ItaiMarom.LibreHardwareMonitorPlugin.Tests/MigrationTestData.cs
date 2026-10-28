@@ -30,4 +30,11 @@ internal static class MigrationTestData
 
 		return entry;
 	}
+
+	/// <summary>Records an explicit answer to the startup elevation question on <paramref name="entry"/>.</summary>
+	public static void SeedAutoElevate(FakeIntegrationConfig config, Guid entry, bool autoElevate) =>
+		config.SeedString(
+			entry,
+			MigratedSensorSelection.AutoElevateKey,
+			autoElevate ? "true" : "false");
 }

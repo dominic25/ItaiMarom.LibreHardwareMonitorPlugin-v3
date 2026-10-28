@@ -78,6 +78,19 @@ public sealed class LibreHardwareMonitorIntegration :
 	/// </summary>
 	private IUserNotifier? _notifications;
 
+	/// <summary>
+	/// Whether the user asked for the elevated helper to be started at startup. It is what the settings
+	/// window opens its checkbox on, and it is re-read on every initialize because the configuration can
+	/// change.
+	/// </summary>
+	private volatile bool _autoElevate;
+
+	/// <summary>
+	/// Set the first time the plugin is initialized, which is the only initialize that counts as a
+	/// start. A reconnect or a settings save runs the same method again, and neither is a start.
+	/// </summary>
+	private int _initialized;
+
 	public LibreHardwareMonitorIntegration(
 		ILogger logger,
 		IHardwareSensorSource source,
@@ -127,7 +140,7 @@ public sealed class LibreHardwareMonitorIntegration :
 	/// what is configured now rather than on what was configured when the plugin started.
 	/// </summary>
 	public IConfigFlow CreateConfigFlow() =>
-		new LibreHardwareMonitorConfigFlow(_hardware, _selection, _window, _logger);
+		new LibreHardwareMonitorConfigFlow(_hardware, _selection, _window, _logger, _autoElevate);
 
 	/// <inheritdoc />
 	public IReadOnlyList<IActionDefinition> Actions { get; }
@@ -226,6 +239,10 @@ public sealed class LibreHardwareMonitorIntegration :
 				// A helper changes what the catalog can offer - fans and the driver-backed readings -
 				// and the host described this plugin before any of that existed.
 				_catalogNotifier.CatalogChanged(CapabilityKinds.Variables, reason: "elevated readings");
+
+				// The click is a one-off: it starts a helper for this session and writes nothing. Making
+				// the plugin ask at every start is the settings window's job, which is the only place
+				// that answers the question.
 				return MissingReadingsIssueProvider.Elevated(result.AccessNote);
 
 			case ElevationOutcome.Cancelled:
@@ -248,6 +265,12 @@ public sealed class LibreHardwareMonitorIntegration :
 	{
 		ArgumentNullException.ThrowIfNull(context);
 
+		// The one initialize that is a start. Startup elevation belongs to that one, not to the
+		// reconnects and configuration changes that run this method again: a prompt dismissed at startup
+		// must not come back on every reconnect, and a prompt raised by a settings save is not what the
+		// checkbox promised.
+		var starting = Interlocked.Exchange(ref _initialized, 1) == 0;
+
 		Volatile.Write(ref _variableApi, context.Variables);
 		Volatile.Write(ref _notifications, context.Notifications);
 
@@ -259,6 +282,7 @@ public sealed class LibreHardwareMonitorIntegration :
 
 		_selection.Replace(migrated.Sensors);
 		_hardware.SetOptions(PollingOptions(migrated.PollingInterval));
+		_autoElevate = migrated.AutoElevate == true;
 
 		// The eager variables are the ones the host reads directly, without ever subscribing, so they are
 		// the working set until a binding narrows or widens it.
@@ -283,6 +307,16 @@ public sealed class LibreHardwareMonitorIntegration :
 		{
 			context.Notifications.Notify(MissingReadingsIssueProvider.Notification(note));
 		}
+
+		// The user asked for this at the last start, so the helper is started without waiting for the
+		// issue list to be opened. It is gated on CanElevate for the same reason the button is: a driver
+		// that is absent, or a process that is already elevated, has nothing to gain from a prompt. The
+		// attempt is fire-and-forget because the UAC prompt stays open until the user answers it, and
+		// the host's handshake must not wait for that.
+		if (starting && _autoElevate && _issues.CanElevate)
+		{
+			AutoElevationAttempt = Task.Run(AutoEnableElevationAsync);
+		}
 	}
 
 	/// <summary>
@@ -306,6 +340,58 @@ public sealed class LibreHardwareMonitorIntegration :
 		await _window.DisposeAsync().ConfigureAwait(false);
 		_variables.Dispose();
 		await _hardware.DisposeAsync().ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// The startup attempt, or null when this process did not make one. It exists so a test can wait for
+	/// the fire-and-forget attempt instead of racing it; production never reads it.
+	/// </summary>
+	internal Task? AutoElevationAttempt { get; private set; }
+
+	/// <summary>
+	/// The startup attempt itself: the same call the issue's button makes, with the same answer. Success
+	/// dismisses the warning the plugin has just raised; a dismissed prompt or a failed launch leaves the
+	/// limited mode in place and is only logged, because a prompt the user declined is not an error to
+	/// report twice.
+	/// </summary>
+	private async Task AutoEnableElevationAsync()
+	{
+		if (_elevation is not { } elevation)
+		{
+			return;
+		}
+
+		try
+		{
+			var result = await elevation.EnableAsync(CancellationToken.None).ConfigureAwait(false);
+
+			switch (result.Outcome)
+			{
+				case ElevationOutcome.Enabled:
+					_logger.Information("The elevated hardware helper was started at startup.");
+
+					// The notification was raised before the attempt, so it is dismissed here the same
+					// way the issue's button dismisses it.
+					Volatile.Read(ref _notifications)?.Dismiss(MissingReadingsIssueProvider.IssueId);
+					_catalogNotifier.CatalogChanged(CapabilityKinds.Variables, reason: "elevated readings");
+					break;
+
+				case ElevationOutcome.Cancelled:
+					_logger.Information(
+						"The administrator prompt for elevated readings at startup was dismissed; the plugin keeps its limited mode.");
+					break;
+
+				default:
+					_logger.Warning(
+						"The elevated hardware helper could not be started at startup: {Error}",
+						result.Error ?? "no reason was reported");
+					break;
+			}
+		}
+		catch (Exception exception)
+		{
+			_logger.Warning(exception, "The elevated hardware helper could not be started at startup.");
+		}
 	}
 
 	/// <summary>

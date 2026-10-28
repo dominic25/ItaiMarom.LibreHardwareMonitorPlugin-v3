@@ -17,6 +17,10 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 /// sensor that had none. It is what the page is first drawn with; every refresh after that comes from
 /// the plugin's <c>/values</c> route.
 /// </param>
+/// <param name="AutoElevate">
+/// Whether the window opens with its <em>Start elevated readings at startup</em> box ticked, which is
+/// the preference the plugin is running with.
+/// </param>
 internal sealed record ClassicWindowOpening(
 	string Title,
 	IReadOnlyList<SensorCategory> Categories,
@@ -27,10 +31,14 @@ internal sealed record ClassicWindowOpening(
 	string RedirectUri,
 	string State,
 	string? Notice = null,
-	IReadOnlyDictionary<string, string?>? Values = null);
+	IReadOnlyDictionary<string, string?>? Values = null,
+	bool AutoElevate = false);
 
 /// <summary>What the classic sensor window sent back when the user pressed Save.</summary>
-internal sealed record ClassicWindowPayload(IReadOnlyList<string> ResourceIds, double? PollingMilliseconds);
+internal sealed record ClassicWindowPayload(
+	IReadOnlyList<string> ResourceIds,
+	double? PollingMilliseconds,
+	bool AutoElevate);
 
 /// <summary>
 /// A loopback-only web server with one job: serve the Macro Deck 2 dialog rebuilt as a page, and collect
@@ -429,7 +437,10 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			form.TryGetValue("sensors", out var sensors)
 				? sensors.Where(resourceId => !string.IsNullOrWhiteSpace(resourceId)).Distinct(StringComparer.Ordinal).ToArray()
 				: [],
-			ReadPolling(form));
+			ReadPolling(form),
+
+			// A checkbox is submitted only while it is ticked, so its presence is the whole answer.
+			form.ContainsKey("auto_elevate"));
 
 		_logger.Information(
 			"The classic sensor window saved {SensorCount} sensors.",

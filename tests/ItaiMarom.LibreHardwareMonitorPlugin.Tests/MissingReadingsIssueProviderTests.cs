@@ -127,7 +127,11 @@ public sealed class MissingReadingsIssueProviderTests
 
 		Assert.That(clear.Success, Is.True);
 		Assert.That(clear.FollowUp, Is.EqualTo(IssueResolutionFollowUp.None));
-		Assert.That(Shows(clear.Message), Is.EqualTo("Elevated readings are on."));
+		Assert.That(Shows(clear.Message), Does.StartWith("Elevated readings are on."));
+
+		// The click is a one-off, so the answer says where the every-start behaviour is set rather than
+		// implying it was just turned on.
+		Assert.That(Shows(clear.Message), Does.Contain("Start elevated readings at startup"));
 
 		Assert.That(stillMissing.Success, Is.True);
 		Assert.That(stillMissing.Message.ToString(), Is.EqualTo("the driver still will not open"));

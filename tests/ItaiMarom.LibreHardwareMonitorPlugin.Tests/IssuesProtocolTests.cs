@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Issues;
+using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 using LibreHardwareMonitor.Hardware;
 using MacroDeck.Plugin.Protocol.Capabilities.Issues;
@@ -137,12 +138,15 @@ public sealed class IssuesProtocolTests
 		}));
 
 		// The issue's button is the only place a helper is started, and a helper that took over makes
-		// the warning it answered obsolete.
+		// the warning it answered obsolete. The answer also points at the setting that makes it happen
+		// at every start, because the click itself does not.
 		Assert.That(source.EnableCount, Is.EqualTo(1));
 		Assert.That(source.IsElevated, Is.True);
 		Assert.That(resolved.GetProperty("success").GetBoolean(), Is.True);
 		Assert.That(resolved.GetProperty("followUp").GetString(), Is.EqualTo("None"));
-		Assert.That(resolved.GetProperty("message").ToString(), Is.EqualTo("Elevated readings are on."));
+		var message = resolved.GetProperty("message").ToString();
+		Assert.That(message, Does.StartWith("Elevated readings are on."));
+		Assert.That(message, Does.Contain("Start elevated readings at startup"));
 		Assert.That(harness.Context.Notifications.Current, Is.Empty);
 	}
 
@@ -168,6 +172,145 @@ public sealed class IssuesProtocolTests
 		Assert.That(resolved.GetProperty("success").GetBoolean(), Is.False);
 		Assert.That(resolved.GetProperty("message").ToString(), Does.Contain("dismissed"));
 		Assert.That(harness.Context.Notifications.Current, Has.Count.EqualTo(1));
+	}
+
+	[Test]
+	public async Task Pressing_the_issue_leaves_the_startup_setting_alone()
+	{
+		var source = new FakeElevatableSource();
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		var entry = SeedSensors(harness, source.Hardware);
+		await harness.InitializeIntegrationsAsync();
+
+		await harness.Issues.ResolveAsync(new IssueResolveArguments
+		{
+			IssueId = MissingReadingsIssueProvider.IssueId,
+		});
+
+		// The button is a one-off for this session. What the next start does is the settings window's
+		// answer alone, so pressing the button must not quietly opt the user into a UAC prompt at every
+		// start - that is why the answer points at the setting instead of writing it.
+		Assert.That(
+			await harness.Context.Config.GetStringAsync(
+				entry,
+				MigratedSensorSelection.AutoElevateKey,
+				CancellationToken.None),
+			Is.Null);
+	}
+
+	[Test]
+	public async Task Startup_starts_the_helper_when_the_user_asked_for_it()
+	{
+		var source = new FakeElevatableSource();
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		var entry = SeedSensors(harness, source.Hardware);
+		MigrationTestData.SeedAutoElevate(harness.Context.Config, entry, autoElevate: true);
+
+		await harness.InitializeIntegrationsAsync();
+
+		// The attempt is fire-and-forget so the UAC prompt cannot hold up the host's handshake; the test
+		// waits for it rather than racing it.
+		var integration = harness.Services.GetRequiredService<LibreHardwareMonitorIntegration>();
+		Assert.That(integration.AutoElevationAttempt, Is.Not.Null);
+		await integration.AutoElevationAttempt!;
+
+		Assert.That(source.EnableCount, Is.EqualTo(1));
+		Assert.That(source.IsElevated, Is.True);
+
+		// The warning the attempt made obsolete is gone, exactly as if the button had been pressed.
+		Assert.That(harness.Context.Notifications.Current, Is.Empty);
+	}
+
+	[Test]
+	public async Task Startup_does_not_start_the_helper_when_the_user_did_not_ask()
+	{
+		var source = new FakeElevatableSource();
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		SeedSensors(harness, source.Hardware);
+
+		await harness.InitializeIntegrationsAsync();
+
+		var integration = harness.Services.GetRequiredService<LibreHardwareMonitorIntegration>();
+		Assert.That(integration.AutoElevationAttempt, Is.Null);
+		Assert.That(source.EnableCount, Is.Zero);
+	}
+
+	[Test]
+	public async Task Startup_does_not_start_the_helper_when_elevation_cannot_help()
+	{
+		var source = new FakeElevatableSource();
+		await using var harness = CreateHarness(
+			new FakeAccessDiagnosis(FakeAccessDiagnosis.NotElevated, canElevate: false),
+			source);
+		var entry = SeedSensors(harness, source.Hardware);
+		MigrationTestData.SeedAutoElevate(harness.Context.Config, entry, autoElevate: true);
+
+		await harness.InitializeIntegrationsAsync();
+
+		// A missing driver is not something a UAC prompt can fix, so asking for one would be a prompt
+		// that could not help.
+		var integration = harness.Services.GetRequiredService<LibreHardwareMonitorIntegration>();
+		Assert.That(integration.AutoElevationAttempt, Is.Null);
+		Assert.That(source.EnableCount, Is.Zero);
+	}
+
+	[Test]
+	public async Task Startup_does_not_start_the_helper_when_it_is_already_elevated()
+	{
+		var source = new FakeElevatableSource(elevated: true);
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		var entry = SeedSensors(harness, source.Hardware);
+		MigrationTestData.SeedAutoElevate(harness.Context.Config, entry, autoElevate: true);
+
+		await harness.InitializeIntegrationsAsync();
+
+		var integration = harness.Services.GetRequiredService<LibreHardwareMonitorIntegration>();
+		Assert.That(integration.AutoElevationAttempt, Is.Null);
+		Assert.That(source.EnableCount, Is.Zero);
+	}
+
+	[Test]
+	public async Task Startup_attempts_the_helper_only_once_per_process()
+	{
+		var source = new FakeElevatableSource
+		{
+			NextResult = new ElevationResult(ElevationOutcome.Cancelled),
+		};
+
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		var entry = SeedSensors(harness, source.Hardware);
+		MigrationTestData.SeedAutoElevate(harness.Context.Config, entry, autoElevate: true);
+
+		await harness.InitializeIntegrationsAsync();
+		var integration = harness.Services.GetRequiredService<LibreHardwareMonitorIntegration>();
+		var firstAttempt = integration.AutoElevationAttempt;
+		Assert.That(firstAttempt, Is.Not.Null);
+		await firstAttempt!;
+
+		// A reconnect initializes the integration again, but it is not a start: the user already answered
+		// the prompt once in this process, and a dismissed prompt must not turn into a loop of them.
+		await harness.InitializeIntegrationsAsync();
+
+		Assert.That(source.EnableCount, Is.EqualTo(1));
+		Assert.That(integration.AutoElevationAttempt, Is.SameAs(firstAttempt));
+	}
+
+	[Test]
+	public async Task Saving_the_startup_setting_does_not_prompt_until_the_next_start()
+	{
+		var source = new FakeElevatableSource();
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		var entry = SeedSensors(harness, source.Hardware);
+		await harness.InitializeIntegrationsAsync();
+
+		// The user ticks the box mid-session. Saving runs initialize again, but the promise is about the
+		// next start: a UAC prompt appearing as the settings window closes is not what the box said.
+		MigrationTestData.SeedAutoElevate(harness.Context.Config, entry, autoElevate: true);
+		await harness.InitializeIntegrationsAsync();
+
+		var integration = harness.Services.GetRequiredService<LibreHardwareMonitorIntegration>();
+		Assert.That(integration.AutoElevationAttempt, Is.Null);
+		Assert.That(source.EnableCount, Is.Zero);
 	}
 
 	[Test]
@@ -223,14 +366,15 @@ public sealed class IssuesProtocolTests
 	}
 
 	/// <summary>Gives the plugin something to serve, so a warning about readings is about something.</summary>
-	private static void SeedSensors(PluginTestHarness harness, FakeHardwareSensorSource? source = null)
+	/// <returns>The id of the configuration entry the selection was written to.</returns>
+	private static Guid SeedSensors(PluginTestHarness harness, FakeHardwareSensorSource? source = null)
 	{
 		source ??= (FakeHardwareSensorSource)harness.Services.GetRequiredService<IHardwareSensorSource>();
 		source.Add("CPU", "CPU Total", SensorType.Load, 42f);
 
 		// Through the configuration, because that is the only road a selection has into the integration:
 		// initialize reads it back and replaces whatever the test set by hand.
-		MigrationTestData.SeedMigratedSensors(harness.Context.Config, source.Sensors[0]);
+		return MigrationTestData.SeedMigratedSensors(harness.Context.Config, source.Sensors[0]);
 	}
 
 	private static PluginTestHarness CreateHarness(

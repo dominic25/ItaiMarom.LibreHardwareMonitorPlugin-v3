@@ -26,7 +26,7 @@
     <value>Libre Hardware Monitor</value>
   </data>
   <data name="Configuration.Description" xml:space="preserve">
-    <value>The sensor window opens in your browser: the Macro Deck 2 dialog, with the whole tree of hardware, reading kind and sensor, and the polling rate under it. Press Continue to open it, and tick the sensors to publish as Macro Deck variables there - what you tick is what is saved. Sensors you leave out stay available from the variable catalog, and the names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working.</value>
+    <value>The sensor window opens in your browser: the Macro Deck 2 dialog, with the whole tree of hardware, reading kind and sensor, the polling rate under it, and a checkbox that asks Windows for administrator rights at every start. Press Continue to open it, and tick the sensors to publish as Macro Deck variables there - what you tick is what is saved. Sensors you leave out stay available from the variable catalog, and the names the Macro Deck 2 plugin used are kept, so an upgraded button keeps working.</value>
   </data>
   <data name="Configuration.UnknownStep" xml:space="preserve">
     <value>Unknown step.</value>
@@ -50,7 +50,7 @@
     <value>Opening the sensor window.</value>
   </data>
   <data name="Issues.ReadingsMissing.Elevated" xml:space="preserve">
-    <value>Elevated readings are on.</value>
+    <value>Elevated readings are on. To have them at every start, tick Start elevated readings at startup in the plugin's settings.</value>
   </data>
   <data name="Issues.ReadingsMissing.ElevationCancelled" xml:space="preserve">
     <value>The administrator prompt was dismissed, so the readings that need the driver are still missing.</value>

@@ -32,6 +32,9 @@ without them.
   binds to. No plugin-specific widget is involved.
 - **The polling rate you choose** - the rate set in the sensor window is how often the plugin reads the
   hardware and how often Macro Deck reads a variable, rather than the host's own five-second default.
+- **Elevated readings at startup** - tick the box in the sensor window and the plugin asks Windows for
+  administrator rights at each start, so the driver-backed readings are there without pressing the issue's
+  button. Leave it clear to be prompted only when you press that button.
 - **A sensor window instead of a form** - the Macro Deck 2 dialog, carried over whole and served to your
   browser, with a live reading beside every sensor.
 
@@ -46,7 +49,10 @@ without them.
    branch are there for machines that report a few hundred sensors, and a dash means "nothing to report
    right now" - a stopped fan, a drive that is not answering - never a zero.
 3. Set the **polling rate** at the bottom of the window, in milliseconds.
-4. Press **Save**.
+4. Tick **Start elevated readings at startup** if you want the plugin to ask Windows for administrator
+   rights at every Macro Deck start, rather than only when you press **Enable elevated readings** in the
+   issue list. Leave it clear to be prompted only when you press that button.
+5. Press **Save**.
 
 What you tick becomes variables as soon as the save reaches Macro Deck. Unticking everything is how the
 "remove all variables" button of the old plugin is reached. Nothing you skip is lost: every sensor on the
@@ -119,16 +125,19 @@ elevated helper (or opens the sensor window when elevation cannot help), a notif
 and a line under the window's heading, all built from the same sentence and naming what to do about it.
 
 The helper is a second process, and it asks for administrator rights once per Macro Deck start. Windows
-has no way to remember a UAC choice, so the prompt comes back after a restart; the plugin never asks
-until you press the button. The prompt appears on the PC running Macro Deck, not on the deck itself.
+has no way to remember a UAC choice, so the prompt comes back after a restart. **Enable elevated readings**
+in the issue list starts the helper for the current session only; to have it start with Macro Deck, tick
+**Start elevated readings at startup** in the sensor window, and clear it to go back to starting the helper
+only when you press the button. The prompt itself is always Windows', and dismissing it leaves the plugin in
+its limited mode. The prompt appears on the PC running Macro Deck, not on the deck itself.
 
 ## Requirements
 
 - Windows x64 - the platform the plugin is packaged for.
 - Macro Deck 3 (prerelease).
 - Optional: PawnIO and administrator rights, for processor temperature and clocks, fan speeds, voltages,
-  drive health and fan control. The plugin starts its own elevated helper from the issue list, so Macro
-  Deck itself does not have to run elevated. See
+  drive health and fan control. The plugin starts its own elevated helper from the issue list, or at
+  startup if you asked it to, so Macro Deck itself does not have to run elevated. See
   [Administrator rights and PawnIO are optional](#administrator-rights-and-pawnio-are-optional).
 
 ## Development

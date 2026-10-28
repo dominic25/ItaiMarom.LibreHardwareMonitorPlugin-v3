@@ -7,8 +7,9 @@ using Serilog;
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 
 /// <summary>
-/// The sensors the plugin is configured to declare as variables, and how often to read them: what a
-/// Macro Deck 2 migration leaves behind, and what the plugin's own settings screen stores.
+/// The sensors the plugin is configured to declare as variables, how often to read them, and whether the
+/// elevated helper should be started at startup: what a Macro Deck 2 migration leaves behind, and what the
+/// plugin's own settings screen stores.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -20,19 +21,35 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 /// sensor.
 /// </para>
 /// <para>
+/// <see cref="AutoElevate"/> is nullable only so that a document written before the setting existed - the
+/// migration's, or any entry an older version left behind - reads back as "off" rather than as a missing
+/// key that has to be repaired. The settings window is the only thing that writes it, and it writes the
+/// answer either way; the issue's <em>Enable elevated readings</em> button deliberately writes nothing, so
+/// pressing it is a one-off for the session and never changes what the next start does.
+/// </para>
+/// <para>
 /// The list is stored as a JSON string inside a JSON value, which looks like one layer too many. It is
 /// deliberate: a configuration value is read back with <c>GetStringAsync</c>, so a structured value would
 /// come back as whatever text the host chose to represent it in. A string is the one shape the round trip
 /// is specified to preserve.
 /// </para>
 /// </remarks>
-public sealed record MigratedSensorSelection(IReadOnlyList<SensorIdentifier> Sensors, TimeSpan? PollingInterval)
+public sealed record MigratedSensorSelection(
+	IReadOnlyList<SensorIdentifier> Sensors,
+	TimeSpan? PollingInterval,
+	bool? AutoElevate = null)
 {
 	/// <summary>The value the sensor list is stored under.</summary>
 	public const string SensorsKey = "sensors";
 
 	/// <summary>The value the polling interval, in milliseconds, is stored under.</summary>
 	public const string PollingRateKey = "polling_rate";
+
+	/// <summary>
+	/// The value the startup elevation preference is stored under, as <c>true</c> or <c>false</c>. Absent
+	/// means off, which is what a migration and an entry written before the setting existed carry.
+	/// </summary>
+	public const string AutoElevateKey = "auto_elevate";
 
 	/// <summary>Nothing migrated, or nothing that could be read back.</summary>
 	public static MigratedSensorSelection Empty { get; } = new([], null);
@@ -57,6 +74,13 @@ public sealed record MigratedSensorSelection(IReadOnlyList<SensorIdentifier> Sen
 		{
 			values[PollingRateKey] = JsonSerializer.SerializeToElement(
 				((long)interval.TotalMilliseconds).ToString(CultureInfo.InvariantCulture),
+				SerializerOptions);
+		}
+
+		if (AutoElevate is { } autoElevate)
+		{
+			values[AutoElevateKey] = JsonSerializer.SerializeToElement(
+				autoElevate ? "true" : "false",
 				SerializerOptions);
 		}
 
@@ -106,6 +130,7 @@ public sealed record MigratedSensorSelection(IReadOnlyList<SensorIdentifier> Sen
 		var sensors = new List<SensorIdentifier>();
 		var seen = new HashSet<SensorIdentifier>();
 		TimeSpan? pollingInterval = null;
+		bool? autoElevate = null;
 
 		foreach (var entry in entries)
 		{
@@ -122,9 +147,15 @@ public sealed record MigratedSensorSelection(IReadOnlyList<SensorIdentifier> Sen
 			{
 				pollingInterval = interval;
 			}
+
+			if (autoElevate is null
+				&& ReadAutoElevate(await ReadValueAsync(config, entry, AutoElevateKey, logger, cancellationToken).ConfigureAwait(false)) is { } preference)
+			{
+				autoElevate = preference;
+			}
 		}
 
-		return new MigratedSensorSelection(sensors, pollingInterval);
+		return new MigratedSensorSelection(sensors, pollingInterval, autoElevate);
 	}
 
 	private static async Task<string?> ReadValueAsync(
@@ -194,4 +225,7 @@ public sealed record MigratedSensorSelection(IReadOnlyList<SensorIdentifier> Sen
 
 		return TimeSpan.FromMilliseconds(milliseconds);
 	}
+
+	private static bool? ReadAutoElevate(string? stored) =>
+		bool.TryParse(stored, out var value) ? value : null;
 }

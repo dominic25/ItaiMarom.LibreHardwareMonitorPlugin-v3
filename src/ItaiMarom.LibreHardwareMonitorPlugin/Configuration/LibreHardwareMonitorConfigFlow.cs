@@ -8,16 +8,17 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 
 /// <summary>
 /// The plugin's settings screen, which is the Macro Deck 2 plugin's configuration dialog: which sensors
-/// to declare as variables, and how often to read them.
+/// to declare as variables, how often to read them, and whether the elevated helper should be started at
+/// startup.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The screen opens straight onto that dialog. Its one button hands the browser a page serving the old
-/// checkbox tree - hardware, then reading kind, then sensor, with the polling-rate control under it, and
-/// each sensor carrying the reading it is reporting right now - and what the user ticks there is what the
-/// host stores. There is no chooser of the plugin's own in front of it: Macro Deck 3 has no tree control
-/// in its declared fields, and a flat form of grouped multi-selects standing in for the tree is not the
-/// dialog that was ported.
+/// checkbox tree - hardware, then reading kind, then sensor, with the polling-rate control and the
+/// startup elevation checkbox under it, and each sensor carrying the reading it is reporting right now -
+/// and what the user ticks there is what the host stores. There is no chooser of the plugin's own in
+/// front of it: Macro Deck 3 has no tree control in its declared fields, and a flat form of grouped
+/// multi-selects standing in for the tree is not the dialog that was ported.
 /// </para>
 /// <para>
 /// The window comes back through the host's OAuth callback, which is the only door into a flow that has
@@ -63,6 +64,7 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 	private readonly HardwareMonitor _hardware;
 	private readonly SensorSelection _selection;
 	private readonly ClassicWindowServer _window;
+	private readonly bool _autoElevate;
 	private readonly ILogger _logger;
 
 	/// <summary>
@@ -75,12 +77,14 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		HardwareMonitor hardware,
 		SensorSelection selection,
 		ClassicWindowServer window,
-		ILogger logger)
+		ILogger logger,
+		bool autoElevate = false)
 	{
 		_hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
 		_window = window ?? throw new ArgumentNullException(nameof(window));
 		_logger = (logger ?? throw new ArgumentNullException(nameof(logger))).ForContext<LibreHardwareMonitorConfigFlow>();
+		_autoElevate = autoElevate;
 	}
 
 	/// <inheritdoc />
@@ -139,7 +143,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 				oauth.RedirectUri,
 				oauth.State,
 				_hardware.AccessNote,
-				values));
+				values,
+				_autoElevate));
 
 			_logger.Information(
 				"The classic sensor window was opened on {SensorCount} sensors at {WindowUri}.",
@@ -186,17 +191,22 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 
 		_logger.Information("The classic sensor window sent back {SensorCount} sensors.", sensors.Count);
 
-		return Complete(sensors, polling);
+		return Complete(sensors, polling, payload.AutoElevate);
 	}
 
 	/// <summary>What the screen ends in: the selection written as a configuration entry.</summary>
-	private ConfigFlowResult Complete(IReadOnlyList<SensorIdentifier> sensors, TimeSpan? polling)
+	private ConfigFlowResult Complete(
+		IReadOnlyList<SensorIdentifier> sensors,
+		TimeSpan? polling,
+		bool autoElevate)
 	{
 		_logger.Information("The sensor configuration was saved with {SensorCount} sensors.", sensors.Count);
 
+		// Saving the window is an explicit answer to the startup elevation checkbox, including when the
+		// box is unticked: from here on the plugin has a preference rather than an unset one.
 		return ConfigFlowResult.Complete(
 			EntryTitle,
-			new MigratedSensorSelection(sensors, polling).ToConfigurationValues());
+			new MigratedSensorSelection(sensors, polling, autoElevate).ToConfigurationValues());
 	}
 
 	/// <summary>

@@ -191,7 +191,9 @@ settings file:
 - The old `pollingRate` is carried across and clamped to the loop's own bounds.
 - The result is one configuration entry, `Macro Deck 2 sensors`: a `sensors` value holding the JSON list,
   and a `polling_rate` value. It carries no secrets and is not meant to be edited - the integration reads
-  it on every initialize, so what it holds *is* the eager variable set.
+  it on every initialize, so what it holds *is* the eager variable set. The old plugin had no startup
+  elevation option, so the migration does not write `auto_elevate`: it stays unset until the user answers
+  the question in the settings window, and an unset value reads back as off.
 
 A sensor that is no longer present simply does not come back, which is what happened to it in Macro Deck 2
 too.
@@ -238,12 +240,18 @@ so the settings screen is the old dialog itself, served to the browser:
 - The window opens on the configuration the plugin is already running with, so reopening it and pressing
   Save cannot lose a pick, and unticking everything is how the old dialog's "delete all variables" button
   is reached.
+- The **Start elevated readings at startup** checkbox sits beside the polling rate. It is the explicit
+  answer to whether the plugin should ask Windows for administrator rights at every start, and it opens on
+  the stored preference. Saving the window writes it either way, so unticking it is a real "no" rather
+  than an absent value. It is also the only thing that writes the preference: the issue's button starts a
+  helper for the session and writes nothing.
 - Saving posts the ticked sensors to the plugin, and the plugin sends the browser on to the host's OAuth
   callback carrying nothing but a key. The callback is a `GET` whose request line the host caps at 8 KB, so
   the selection travels in the POST: the address only ever says "this window finished".
-- What it stores is the shape a migration writes - one entry, a `sensors` value and a `polling_rate` value
-  - so the settings screen and the migration are two writers of one document, and a selection survives
-  being reconfigured as well as it survives being upgraded.
+- What it stores is the shape a migration writes - one entry, a `sensors` value and a `polling_rate` value,
+  plus the `auto_elevate` preference the migration leaves unset - so the settings screen and the migration
+  are two writers of one document, and a selection survives being reconfigured as well as it survives
+  being upgraded.
 
 ## How the elevated hardware helper works
 
@@ -260,6 +268,14 @@ starts unelevated and moves the privilege into a helper it owns:
   readings it already has and the issue stays up. The package ships the apphost, so the prompt names the
   plugin rather than `dotnet`. The manifest's entrypoint stays the `.dll` - the CLI requires a
   framework-dependent entrypoint to be a managed assembly - and the launcher finds the apphost beside it.
+- **The startup prompt is the setting, not the button.** When the stored `auto_elevate` preference is
+  true, the plugin's first initialize starts the helper itself instead of waiting for the issue to be
+  opened. The attempt is fire-and-forget so the host's handshake never waits for a UAC prompt, it is gated
+  on `CanElevate` so a missing driver or an already-elevated process does not prompt, and only the first
+  initialize of the process counts as a start: a reconnect or a settings save cannot produce a second
+  prompt, and ticking the box does not raise one immediately. The issue's button stays a one-off - it
+  enables the helper for the session and answers with where the setting lives - so the preference is only
+  ever written by the settings window.
 - **The helper owns the hardware.** `HardwareHost` creates the only `Computer`, opens it, and serves a
   narrow named-pipe protocol: `hello`, `open`, `close`, `read`, `controls`, `set`, `reset`, `ping` and
   `stop`. `HardwareHostHandler` carries the requests out; a hardware failure is an answer for that

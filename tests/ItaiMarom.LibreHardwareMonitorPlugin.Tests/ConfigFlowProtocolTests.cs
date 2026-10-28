@@ -112,6 +112,63 @@ public sealed class ConfigFlowProtocolTests
 	}
 
 	[Test]
+	public async Task Saving_the_window_stores_the_startup_elevation_choice()
+	{
+		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var result = await SaveWindowAsync(harness, Session, [cpu.ResourceId], 1000, autoElevate: true);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.AutoElevate, Is.True);
+	}
+
+	[Test]
+	public async Task The_window_opens_on_the_stored_startup_elevation_choice()
+	{
+		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		var entry = MigrationTestData.SeedMigratedSensors(harness.Context.Config, cpu);
+		MigrationTestData.SeedAutoElevate(harness.Context.Config, entry, autoElevate: true);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var page = await WindowClient.ReadPageAsync(await ContinueAsync(harness, Session));
+
+		Assert.That(page, Does.Contain("name=\"auto_elevate\" value=\"1\" checked>"));
+	}
+
+	[Test]
+	public async Task Unticking_the_startup_elevation_box_stores_an_explicit_no()
+	{
+		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		var entry = MigrationTestData.SeedMigratedSensors(harness.Context.Config, cpu);
+		MigrationTestData.SeedAutoElevate(harness.Context.Config, entry, autoElevate: true);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		// The window opened with the box ticked; the user cleared it and saved. From here on the plugin
+		// has a preference rather than an unset one, so the issue's button cannot turn it back on.
+		var result = await SaveWindowAsync(harness, Session, [cpu.ResourceId], 1000);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.AutoElevate, Is.False);
+	}
+
+	[Test]
 	public async Task What_the_window_was_ticked_with_is_what_is_stored()
 	{
 		var source = new FakeHardwareSensorSource()
@@ -329,10 +386,11 @@ public sealed class ConfigFlowProtocolTests
 		PluginTestHarness harness,
 		string sessionId,
 		IReadOnlyCollection<string> ticked,
-		double? polling = null)
+		double? polling = null,
+		bool autoElevate = false)
 	{
 		var window = await ContinueAsync(harness, sessionId);
-		var callback = await WindowClient.SaveAsync(window, ticked, polling);
+		var callback = await WindowClient.SaveAsync(window, ticked, polling, autoElevate);
 
 		return await ResumeAsync(harness, sessionId, callback);
 	}

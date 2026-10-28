@@ -8,7 +8,7 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 
 /// <summary>
 /// Draws the Macro Deck 2 dialog: a tick box per sensor under its reading kind and its hardware, with
-/// the polling rate underneath.
+/// the polling rate and the startup elevation option underneath.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -42,6 +42,7 @@ internal static class ClassicWindowPage
 	private const string PollingMarker = "__POLLING__";
 	private const string PollingMinimumMarker = "__POLLING_MIN__";
 	private const string PollingMaximumMarker = "__POLLING_MAX__";
+	private const string AutoElevateMarker = "__AUTO_ELEVATE__";
 
 	/// <summary>What a window with no readings to show has: every cell renders as "no reading".</summary>
 	private static readonly IReadOnlyDictionary<string, string?> EmptyValues =
@@ -143,6 +144,8 @@ internal static class ClassicWindowPage
 			width: 92px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
 			background: var(--bg); color: var(--text); font: inherit; text-align: right;
 		}
+		.startup { color: var(--dim); }
+		.startup label { display: flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap; }
 		.actions { display: flex; gap: 10px; }
 		button {
 			padding: 8px 18px; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer;
@@ -177,6 +180,12 @@ internal static class ClassicWindowPage
 					<label for="polling" title="How often the sensors are read, in milliseconds.">Polling rate</label>
 					<input type="range" id="pollingRange" min="__POLLING_MIN__" max="__POLLING_MAX__" step="1">
 					<input type="number" id="polling" name="polling" min="__POLLING_MIN__" max="__POLLING_MAX__" step="1" value="__POLLING__">
+				</div>
+				<div class="startup">
+					<label title="Ask Windows for administrator rights each time Macro Deck starts, so the readings that need the driver are there without pressing Enable elevated readings first. Windows still shows its prompt every time, and this is only used when the driver is installed and Macro Deck is not already running as administrator.">
+						<input type="checkbox" name="auto_elevate" value="1"__AUTO_ELEVATE__>
+						Start elevated readings at startup
+					</label>
 				</div>
 				<div class="actions">
 					<button type="submit" name="cancel" value="1">Cancel</button>
@@ -328,7 +337,8 @@ internal static class ClassicWindowPage
 			.Replace(ValuesMarker, $"/values?s={WebUtility.UrlEncode(key)}", StringComparison.Ordinal)
 			.Replace(PollingMinimumMarker, Milliseconds(opening.MinimumPollingMilliseconds), StringComparison.Ordinal)
 			.Replace(PollingMaximumMarker, Milliseconds(opening.MaximumPollingMilliseconds), StringComparison.Ordinal)
-			.Replace(PollingMarker, Milliseconds(opening.PollingMilliseconds), StringComparison.Ordinal);
+			.Replace(PollingMarker, Milliseconds(opening.PollingMilliseconds), StringComparison.Ordinal)
+			.Replace(AutoElevateMarker, opening.AutoElevate ? " checked" : string.Empty, StringComparison.Ordinal);
 	}
 
 	/// <summary>

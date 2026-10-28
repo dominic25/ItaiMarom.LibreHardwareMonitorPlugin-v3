@@ -172,6 +172,45 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task The_window_opens_with_the_startup_elevation_choice_it_was_given()
+	{
+		var page = await WindowClient.ReadPageAsync(Open([CpuCore1], autoElevate: true, CpuCore1).PageUri);
+
+		Assert.That(page, Does.Contain("name=\"auto_elevate\" value=\"1\" checked>"));
+	}
+
+	[Test]
+	public async Task A_window_that_was_not_told_to_start_elevated_leaves_the_box_unticked()
+	{
+		var page = await WindowClient.ReadPageAsync(Open([CpuCore1], CpuCore1).PageUri);
+
+		Assert.That(page, Does.Contain("name=\"auto_elevate\" value=\"1\">"));
+		Assert.That(page, Does.Not.Contain("name=\"auto_elevate\" value=\"1\" checked"));
+	}
+
+	[Test]
+	public async Task Saving_the_window_returns_the_startup_elevation_choice()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		await WindowClient.SaveAsync(opened.PageUri, [CpuCore1.ResourceId], 1000, autoElevate: true);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.AutoElevate, Is.True);
+	}
+
+	[Test]
+	public async Task Saving_the_window_with_the_box_unticked_returns_an_explicit_no()
+	{
+		var opened = Open([CpuCore1], autoElevate: true, CpuCore1);
+
+		await WindowClient.SaveAsync(opened.PageUri, [CpuCore1.ResourceId], 1000);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.AutoElevate, Is.False);
+	}
+
+	[Test]
 	public async Task A_selection_is_handed_over_once()
 	{
 		var opened = Open([CpuCore1], CpuCore1);
@@ -335,23 +374,37 @@ public sealed class ClassicWindowServerTests
 	private ClassicWindowServer.Opened Open(
 		IReadOnlyCollection<SensorIdentifier> reported,
 		params SensorIdentifier[] selected) =>
-		Open(reported, values: null, selected);
+		Open(reported, autoElevate: false, values: null, selected);
 
 	private ClassicWindowServer.Opened Open(
 		IReadOnlyCollection<SensorIdentifier> reported,
 		IReadOnlyDictionary<string, string?>? values,
 		params SensorIdentifier[] selected) =>
-		OpenWithNotice(null, reported, values, selected);
+		Open(reported, autoElevate: false, values, selected);
+
+	private ClassicWindowServer.Opened Open(
+		IReadOnlyCollection<SensorIdentifier> reported,
+		bool autoElevate,
+		params SensorIdentifier[] selected) =>
+		Open(reported, autoElevate, values: null, selected);
+
+	private ClassicWindowServer.Opened Open(
+		IReadOnlyCollection<SensorIdentifier> reported,
+		bool autoElevate,
+		IReadOnlyDictionary<string, string?>? values,
+		params SensorIdentifier[] selected) =>
+		OpenWithNotice(null, reported, autoElevate, values, selected);
 
 	private ClassicWindowServer.Opened OpenWithNotice(
 		string? notice,
 		IReadOnlyCollection<SensorIdentifier> reported,
 		params SensorIdentifier[] selected) =>
-		OpenWithNotice(notice, reported, values: null, selected);
+		OpenWithNotice(notice, reported, autoElevate: false, values: null, selected);
 
 	private ClassicWindowServer.Opened OpenWithNotice(
 		string? notice,
 		IReadOnlyCollection<SensorIdentifier> reported,
+		bool autoElevate,
 		IReadOnlyDictionary<string, string?>? values,
 		params SensorIdentifier[] selected) =>
 		_server.Open(new ClassicWindowOpening(
@@ -364,7 +417,8 @@ public sealed class ClassicWindowServerTests
 			RedirectUri,
 			State,
 			notice,
-			values));
+			values,
+			autoElevate));
 
 	/// <summary>The readings the window would be reading, scripted rather than read off a machine.</summary>
 	private sealed class FakeReadings : ISensorReadingSource

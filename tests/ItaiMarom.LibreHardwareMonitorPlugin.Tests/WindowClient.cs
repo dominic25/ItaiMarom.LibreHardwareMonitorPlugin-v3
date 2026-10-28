@@ -59,7 +59,11 @@ internal static class WindowClient
 	/// Ticks what the user ticked and presses Save, and gives back the address the browser was sent to:
 	/// the host's callback, carrying the state and the key the flow reads its selection back under.
 	/// </summary>
-	public static async Task<string> SaveAsync(Uri windowUri, IEnumerable<string> resourceIds, double? polling = null)
+	public static async Task<string> SaveAsync(
+		Uri windowUri,
+		IEnumerable<string> resourceIds,
+		double? polling = null,
+		bool autoElevate = false)
 	{
 		var fields = resourceIds
 			.Select(resourceId => new KeyValuePair<string, string>("sensors", resourceId))
@@ -71,6 +75,13 @@ internal static class WindowClient
 			fields.Add(new KeyValuePair<string, string>(
 				"polling",
 				milliseconds.ToString("R", CultureInfo.InvariantCulture)));
+		}
+
+		if (autoElevate)
+		{
+			// A checkbox is submitted only while it is ticked, so this is exactly what a browser sends
+			// for the startup elevation box.
+			fields.Add(new KeyValuePair<string, string>("auto_elevate", "1"));
 		}
 
 		return await PostAsync(windowUri, fields).ConfigureAwait(false);

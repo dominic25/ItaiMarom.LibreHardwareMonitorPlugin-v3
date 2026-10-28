@@ -118,4 +118,70 @@ public sealed class MigratedSensorSelectionTests
 
 		Assert.That(restored.Sensors, Is.Empty);
 	}
+
+	[Test]
+	public async Task An_explicit_yes_to_startup_elevation_is_read_back()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+		MigrationTestData.SeedAutoElevate(config, entry, autoElevate: true);
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.AutoElevate, Is.True);
+	}
+
+	[Test]
+	public async Task An_explicit_no_to_startup_elevation_is_read_back_as_false()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+		MigrationTestData.SeedAutoElevate(config, entry, autoElevate: false);
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		// False is not the same as unset: the user answered the question, and the issue's button must
+		// not turn it back on.
+		Assert.That(restored.AutoElevate, Is.False);
+	}
+
+	[Test]
+	public async Task A_value_that_is_not_a_boolean_leaves_the_startup_choice_unset()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+		config.SeedString(entry, MigratedSensorSelection.AutoElevateKey, "sometimes");
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.AutoElevate, Is.Null);
+	}
+
+	[Test]
+	public void An_explicit_startup_elevation_choice_is_stored_as_text()
+	{
+		Assert.That(
+			new MigratedSensorSelection([CpuTotal], null, AutoElevate: true)
+				.ToValues()[MigratedSensorSelection.AutoElevateKey]
+				.GetString(),
+			Is.EqualTo("true"));
+		Assert.That(
+			new MigratedSensorSelection([CpuTotal], null, AutoElevate: false)
+				.ToValues()[MigratedSensorSelection.AutoElevateKey]
+				.GetString(),
+			Is.EqualTo("false"));
+	}
+
+	[Test]
+	public void An_unset_startup_elevation_choice_is_not_stored_at_all()
+	{
+		var values = new MigratedSensorSelection([CpuTotal], null).ToValues();
+
+		// Only the settings window writes the preference, and it always writes an answer. A migration
+		// leaves the key out, and a missing key reads back as off.
+		Assert.That(values.ContainsKey(MigratedSensorSelection.AutoElevateKey), Is.False);
+	}
 }

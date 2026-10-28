@@ -15,8 +15,11 @@ internal sealed class FakeElevatableSource : IHardwareSensorSource, IHardwareEle
 {
 	private readonly FakeHardwareSensorSource _hardware;
 
-	public FakeElevatableSource(FakeHardwareSensorSource? hardware = null) =>
+	public FakeElevatableSource(FakeHardwareSensorSource? hardware = null, bool elevated = false)
+	{
 		_hardware = hardware ?? new FakeHardwareSensorSource();
+		IsElevated = elevated;
+	}
 
 	/// <summary>The sensors and controls the plugin actually reads.</summary>
 	public FakeHardwareSensorSource Hardware => _hardware;
