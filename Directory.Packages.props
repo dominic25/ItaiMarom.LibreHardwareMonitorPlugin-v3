@@ -17,11 +17,6 @@
         <PackageVersion Include="MacroDeck.Plugin.Serilog" Version="$(MacroDeckSdkVersion)" />
         <PackageVersion Include="MacroDeck.Plugin.Testing" Version="$(MacroDeckSdkVersion)" />
         <PackageVersion Include="MacroDeck.Sdk" Version="$(MacroDeckSdkVersion)" />
-        <!-- The declarative UI model (config flows, settings views). Referenced from the project in
-             the UI step. -->
-        <PackageVersion Include="MacroDeck.Ui" Version="$(MacroDeckSdkVersion)" />
-        <PackageVersion Include="MacroDeck.Ui.Testing" Version="$(MacroDeckSdkVersion)" />
-        <PackageVersion Include="MacroDeck.Plugin.Cli" Version="$(MacroDeckSdkVersion)" />
     </ItemGroup>
 
     <ItemGroup>

@@ -24,6 +24,29 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <!-- Macro Deck runs plugins on the ASP.NET Core shared framework. Declaring it here (rather
+             than inheriting it from the SDK package) lets NuGet prune the Microsoft.Extensions.*
+             packages that Serilog.Extensions.Hosting would otherwise pull in as NuGet packages. -->
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    </ItemGroup>
+
+    <Target Name="PruneUnneededPackages" DependsOnTargets="AddPrunePackageReferences" BeforeTargets="CollectPrunePackageReferences">
+        <!-- The Macro Deck Store lists every package in the restore graph, so unused ones are pruned
+             here rather than only excluded from the publish output. Mono.Posix is loaded by
+             LibreHardwareMonitor only on Unix, the System.IO.Ports native shim only ships for
+             non-Windows RIDs, and System.IO.FileSystem.AccessControl is part of the shared framework.
+             The SDK already asks NuGet to prune that last one, but its entry carries a placeholder
+             version (4.4.32767) that does not cover the 5.0.0 LibreHardwareMonitorLib asks for, so it
+             is replaced with a matching version. -->
+        <ItemGroup>
+            <PrunePackageReference Include="runtime.native.System.IO.Ports" Version="10.0.3" />
+            <PrunePackageReference Include="Mono.Posix.NETStandard" Version="1.0.0" />
+            <PrunePackageReference Remove="System.IO.FileSystem.AccessControl" />
+            <PrunePackageReference Include="System.IO.FileSystem.AccessControl" Version="5.0.0" />
+        </ItemGroup>
+    </Target>
+
+    <ItemGroup>
         <!-- The generated Strings class and LocalizedText are part of this project's own source. -->
         <PackageReference Include="MacroDeck.Localization" />
         <PackageReference Include="MacroDeck.Plugin.Hosting" />
