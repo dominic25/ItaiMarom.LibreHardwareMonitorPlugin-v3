@@ -54,8 +54,16 @@ internal sealed record HardwareSensorDto(
 {
 	public static HardwareSensorDto From(HardwareSensor sensor) => new(
 		SensorIdentifierDto.From(sensor.Sensor),
-		sensor.Value,
-		sensor.Control is { } control ? ControlRangeDto.From(control) : null);
+
+		// A non-finite reading is the library saying it has nothing to report, which is what a null
+		// value already means. It also cannot travel as JSON: serialising it throws, and a helper that
+		// threw while answering a read would die and take the elevated readings with it.
+		sensor.Value is { } value && float.IsFinite(value) ? value : null,
+
+		// A span the chip cannot describe is no span at all, and a non-finite bound cannot travel either.
+		sensor.Control is { } control && float.IsFinite(control.Min) && float.IsFinite(control.Max)
+			? ControlRangeDto.From(control)
+			: null);
 
 	public HardwareSensor ToHardwareSensor() => new(
 		Sensor.ToSensorIdentifier(),

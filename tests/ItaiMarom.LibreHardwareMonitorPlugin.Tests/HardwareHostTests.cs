@@ -114,6 +114,46 @@ public sealed class HardwareHostTests
 		Assert.That(read.Controls![0].Controllable, Is.True);
 	}
 
+	[TestCase(float.NaN)]
+	[TestCase(float.PositiveInfinity)]
+	[TestCase(float.NegativeInfinity)]
+	public void A_non_finite_reading_travels_as_no_reading(float value)
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Package", SensorType.Temperature);
+
+		var dto = HardwareSensorDto.From(new HardwareSensor(sensor, value));
+
+		// The library reports NaN for a sensor with nothing to say, which is what a null sample value
+		// already means here - and a non-finite number cannot be written as JSON at all.
+		Assert.That(dto.Value, Is.Null);
+		Assert.That(dto.ToHardwareSensor().Value, Is.Null);
+	}
+
+	[Test]
+	public async Task A_reading_the_library_could_not_describe_is_answered_rather_than_killing_the_helper()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Package", SensorType.Temperature, float.NaN);
+		using var handler = new HardwareHostHandler(source, logger);
+
+		var read = handler.Handle(new HardwareHostRequest { Type = "read" });
+
+		// This is the shape of the bug that dropped the elevated helper whenever the sensor window was
+		// opened: a full read reached a sensor the library described as NaN, serialising the answer threw,
+		// and the helper exited - so the plugin fell back to the readings it cannot reach.
+		using var stream = new MemoryStream();
+		await HardwareHostProtocol.WriteAsync(stream, read, CancellationToken.None);
+		stream.Position = 0;
+
+		var answered = await HardwareHostProtocol.ReadAsync<HardwareHostResponse>(
+			stream,
+			CancellationToken.None);
+
+		Assert.That(answered.Ok, Is.True);
+		Assert.That(answered.Sensors, Has.Length.EqualTo(1));
+		Assert.That(answered.Sensors![0].Value, Is.Null);
+	}
+
 	[Test]
 	public void A_message_length_that_cannot_be_a_message_is_a_protocol_failure()
 	{

@@ -284,6 +284,13 @@ starts unelevated and moves the privilege into a helper it owns:
   travel down the pipe. `ElevatedHardwareSource` closes the local hardware before the helper opens it
   and hands every later read, control list and write to the helper. The polling loop, cache and variable
   surface do not know the difference.
+- **A non-finite reading is no reading.** The library reports `NaN` or an infinity for a sensor it has
+  nothing to say about, and `System.Text.Json` refuses to write those. A full `read` that reached one
+  would therefore throw while answering, end the helper, and drop the plugin to the local source - which
+  is exactly what opening the sensor window used to do, because the window asks for the whole machine.
+  `LibreHardwareMonitorSource` and `HardwareSensorDto` both turn a non-finite value, and a non-finite
+  control span, into null - what the rest of the plugin already means by "no reading" - and a response
+  that still cannot be serialised is answered with a refusal rather than ending the helper.
 - **A helper that dies falls back.** A broken pipe drops back to the local source and the issue list
   offers elevation again. A write that was in flight is reported as a failure rather than silently
   retried locally, because the local process cannot reach the control.

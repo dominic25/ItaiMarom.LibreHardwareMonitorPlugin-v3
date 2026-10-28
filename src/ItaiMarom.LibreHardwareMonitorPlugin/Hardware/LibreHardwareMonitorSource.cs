@@ -53,7 +53,7 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 
 			foreach (var (sensor, native) in Walk(hardware, RootOf(hardware)))
 			{
-				sensors.Add(new HardwareSensor(sensor, native.Value, Range(native)));
+				sensors.Add(new HardwareSensor(sensor, Finite(native.Value), Range(native)));
 			}
 		}
 
@@ -143,6 +143,15 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 		range = default;
 		return false;
 	}
+
+	/// <summary>
+	/// A reading as a sample can hold it. The library reports <c>NaN</c> or an infinity for a sensor it
+	/// has nothing to say about, and every consumer of a sample already treats a non-finite number as
+	/// "no reading" - so it is normalised here, at the source, rather than left to reach the cache, the
+	/// variables or the helper's JSON.
+	/// </summary>
+	private static float? Finite(float? value) =>
+		value is { } number && float.IsFinite(number) ? number : null;
 
 	/// <summary>Updates one piece of hardware and everything below it, because it does not do that itself.</summary>
 	private static void Update(IHardware hardware)

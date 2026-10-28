@@ -197,7 +197,33 @@ internal sealed class HardwareHostSession
 			}
 
 			var response = _handler.Handle(request);
-			await HardwareHostProtocol.WriteAsync(pipe, response, stopping).ConfigureAwait(false);
+
+			try
+			{
+				await HardwareHostProtocol.WriteAsync(pipe, response, stopping).ConfigureAwait(false);
+			}
+			catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+			{
+				_logger.Debug(exception, "The plugin closed the hardware helper's pipe.");
+				return;
+			}
+			catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+			{
+				// Serialisation failed before a byte reached the pipe, so a refusal can still be sent.
+				// Answering badly is a result for this request; exiting would take every later reading
+				// with it and make the plugin fall back to the ones this process cannot reach.
+				_logger.Warning(exception, "The elevated hardware helper could not describe a {RequestType} answer.", request.Type);
+				await HardwareHostProtocol
+					.WriteAsync(
+						pipe,
+						new HardwareHostResponse
+						{
+							Ok = false,
+							Error = "The elevated hardware helper could not describe the hardware.",
+						},
+						stopping)
+					.ConfigureAwait(false);
+			}
 		}
 	}
 
