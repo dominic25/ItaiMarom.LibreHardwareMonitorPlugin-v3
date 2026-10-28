@@ -104,23 +104,31 @@ sensor without them:
 
 1. **PawnIO**, installed once from [pawnio.eu](https://pawnio.eu). It is the driver the hardware library
    loads its modules into.
-2. **Administrator rights for Macro Deck.** Windows only lets an administrator open that driver, so
-   without elevation it is installed but cannot be used. Right-click Macro Deck's shortcut, open
-   *Properties* > *Advanced*, and tick *Run as administrator*.
+2. **Administrator rights, on demand.** Windows only lets an administrator open that driver, so without
+   elevation it is installed but cannot be used. The plugin does not need Macro Deck itself to run
+   elevated: when it detects that the driver is out of reach it says so in Macro Deck's issue list, and
+   its **Enable elevated readings** button starts a small helper as administrator. The UAC prompt is
+   the one you see; dismissing it leaves the plugin in its limited mode. You can still run Macro Deck as
+   administrator if you prefer, which is what the plugin falls back to when no helper is running.
 
 These are what the affected readings - **processor temperatures and clocks, fan speeds, voltages and drive
 health** - are read through. Without them those branches are not empty but absent from the sensor window,
 because the library cannot enumerate the devices behind them, and a fan control does not exist at all.
-The plugin says so rather than leaving a gap: a warning in Macro Deck's issue list whose button opens the
-sensor window, a notification when it starts, and a line under the window's heading, all built from the
-same sentence and naming what to do about it.
+The plugin says so rather than leaving a gap: a warning in Macro Deck's issue list whose button starts the
+elevated helper (or opens the sensor window when elevation cannot help), a notification when it starts,
+and a line under the window's heading, all built from the same sentence and naming what to do about it.
+
+The helper is a second process, and it asks for administrator rights once per Macro Deck start. Windows
+has no way to remember a UAC choice, so the prompt comes back after a restart; the plugin never asks
+until you press the button. The prompt appears on the PC running Macro Deck, not on the deck itself.
 
 ## Requirements
 
 - Windows x64 - the platform the plugin is packaged for.
 - Macro Deck 3 (prerelease).
 - Optional: PawnIO and administrator rights, for processor temperature and clocks, fan speeds, voltages,
-  drive health and fan control. See
+  drive health and fan control. The plugin starts its own elevated helper from the issue list, so Macro
+  Deck itself does not have to run elevated. See
   [Administrator rights and PawnIO are optional](#administrator-rights-and-pawnio-are-optional).
 
 ## Development
@@ -128,6 +136,10 @@ same sentence and naming what to do about it.
 The plugin's internals - the polling loop, sensor identity and variable naming, the Macro Deck 2
 migration, how the sensor window is served, the project layout, and how to build and package the plugin -
 are in [DEVELOPMENT.md](DEVELOPMENT.md).
+
+To build the installable packages, run `.\build-packages.ps1` from the repository root. It writes two
+`.macroDeckPlugin` files to `dist/`: the store package and a test package with its own plugin id
+(`...test`) and `(Test)` name, so both can be installed side by side.
 
 ## License
 

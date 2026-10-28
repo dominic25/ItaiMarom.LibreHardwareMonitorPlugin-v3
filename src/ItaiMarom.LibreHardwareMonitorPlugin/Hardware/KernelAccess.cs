@@ -40,32 +40,41 @@ internal static class KernelAccess
 	private const string Affected = "Processor temperatures and clocks, fan speeds, voltages and drive health";
 
 	/// <summary>
-	/// The sentence to show the user, or null when the driver is installed and this process can open it.
+	/// What is missing right now, and whether an elevated helper could change it. Only the "installed but
+	/// this process is not an administrator" case is something elevation fixes; a driver that is absent,
+	/// or one that will not open even for an administrator, is not.
 	/// </summary>
-	public static string? Describe()
+	public static AccessDiagnosis Diagnose()
 	{
 		if (!OperatingSystem.IsWindows())
 		{
-			return null;
+			return AccessDiagnosis.Reachable;
 		}
 
 		if (!IsInstalled())
 		{
-			return $"{Affected} are read through the {DriverName} driver, which this machine does not "
-				+ $"have. Install it from {DriverUri} and start Macro Deck again to see them here.";
+			return new AccessDiagnosis(
+				$"{Affected} are read through the {DriverName} driver, which this machine does not "
+					+ $"have. Install it from {DriverUri} and start Macro Deck again to see them here.",
+				CanElevate: false);
 		}
 
 		if (CanOpenDevice())
 		{
-			return null;
+			return AccessDiagnosis.Reachable;
 		}
 
 		return IsElevated()
-			? $"{Affected} are read through the {DriverName} driver, which is installed but would not "
-				+ "open. They are missing from this list until it can be opened again."
-			: $"{Affected} are read through a kernel driver, and Windows only lets an administrator open "
-				+ "it, so they are missing from this list. Start Macro Deck as an administrator - "
-				+ "right-click its shortcut, Properties, Advanced, Run as administrator - to see them here.";
+			? new AccessDiagnosis(
+				$"{Affected} are read through the {DriverName} driver, which is installed but would not "
+					+ "open. They are missing from this list until it can be opened again.",
+				CanElevate: false)
+			: new AccessDiagnosis(
+				$"{Affected} are read through a kernel driver, and Windows only lets an administrator open "
+					+ "it, so they are missing from this list. Press Enable elevated readings in Macro "
+					+ "Deck's issue list to start the plugin's helper with the rights it needs - or start "
+					+ "Macro Deck as an administrator - to see them here.",
+				CanElevate: true);
 	}
 
 	/// <summary>
@@ -112,9 +121,12 @@ internal static class KernelAccess
 		}
 	}
 
-	/// <summary>Whether this process runs elevated, which is what the driver asks for.</summary>
+	/// <summary>
+	/// Whether this process runs elevated, which is what the driver asks for. The elevated helper asks the
+	/// same question about itself before it serves anything, so both processes agree on what elevated means.
+	/// </summary>
 	[SupportedOSPlatform("windows")]
-	private static bool IsElevated()
+	internal static bool IsElevated()
 	{
 		try
 		{

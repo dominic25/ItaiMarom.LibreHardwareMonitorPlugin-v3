@@ -7,7 +7,7 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
 /// A scripted <see cref="IHardwareSensorSource"/>, so the polling loop's lifecycle - start, read, stall,
 /// stop, restart - can be tested without a machine full of sensors behind it.
 /// </summary>
-internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
+internal sealed class FakeHardwareSensorSource : IHardwareSensorSource, IAccessNoteSource
 {
 	private readonly List<Entry> _entries = [];
 	private readonly Dictionary<SensorIdentifier, FakeControl> _controls = [];
@@ -37,6 +37,12 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	public string? LastResetSensorId { get; private set; }
 
 	public bool IsOpen { get; private set; }
+
+	/// <summary>What the source reports it still cannot read, when a test wants an elevated note.</summary>
+	public string? AccessNote { get; set; }
+
+	/// <summary>Runs at the start of <see cref="Open"/>. Used to simulate hardware that will not open.</summary>
+	public Action? OnOpen { get; set; }
 
 	/// <summary>Runs inside <see cref="Read"/>, on the loop's thread. Used to block or observe a poll.</summary>
 	public Action? OnRead { get; set; }
@@ -114,6 +120,7 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource
 	/// <inheritdoc />
 	public void Open()
 	{
+		OnOpen?.Invoke();
 		OpenCount++;
 		IsOpen = true;
 	}

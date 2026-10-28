@@ -24,6 +24,18 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 /// </remarks>
 public static class SensorVariableNaming
 {
+#if LHM_TEST_BUILD
+	/// <summary>
+	/// The namespace a test build puts in front of every declared variable name. Macro Deck's variable
+	/// names are global, so a test package installed next to the store package would otherwise collide
+	/// on every sensor and be refused wholesale.
+	/// </summary>
+	private const string NamePrefix = "test_";
+#else
+	/// <summary>Nothing to add: the store build keeps the names layouts already reference.</summary>
+	private const string NamePrefix = "";
+#endif
+
 	/// <summary>Assigns a unique name and id to every sensor in <paramref name="sensors"/>.</summary>
 	public static IReadOnlyList<SensorVariable> Assign(IEnumerable<SensorIdentifier> sensors)
 	{
@@ -43,7 +55,7 @@ public static class SensorVariableNaming
 
 		foreach (var sensor in ordered)
 		{
-			var name = UniqueName(sensor, names);
+			var name = NamePrefix + UniqueName(sensor, names);
 			names.Add(name);
 
 			var id = UniqueId(sensor.VariableId, ids);

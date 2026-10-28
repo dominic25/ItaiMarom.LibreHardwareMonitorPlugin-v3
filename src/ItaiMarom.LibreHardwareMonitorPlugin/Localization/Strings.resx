@@ -43,8 +43,20 @@
   <data name="Issues.ReadingsMissing.Action" xml:space="preserve">
     <value>Open the sensor window</value>
   </data>
+  <data name="Issues.ReadingsMissing.EnableAction" xml:space="preserve">
+    <value>Enable elevated readings</value>
+  </data>
   <data name="Issues.ReadingsMissing.Resolved" xml:space="preserve">
     <value>Opening the sensor window.</value>
+  </data>
+  <data name="Issues.ReadingsMissing.Elevated" xml:space="preserve">
+    <value>Elevated readings are on.</value>
+  </data>
+  <data name="Issues.ReadingsMissing.ElevationCancelled" xml:space="preserve">
+    <value>The administrator prompt was dismissed, so the readings that need the driver are still missing.</value>
+  </data>
+  <data name="Issues.ReadingsMissing.ElevationFailed" xml:space="preserve">
+    <value>The elevated hardware helper could not be started, so the readings that need the driver are still missing.</value>
   </data>
   <data name="Issues.ReadingsMissing.Unknown" xml:space="preserve">
     <value>Unknown issue.</value>
@@ -59,7 +71,7 @@
     <value>No controllable fans or pumps were found on this machine.</value>
   </data>
   <data name="Actions.NoControlsBlocked" xml:space="preserve">
-    <value>No controllable fans or pumps were found. The hardware library's driver is not available to this process, which is what hides them; starting Macro Deck as an administrator is what normally makes them appear.</value>
+    <value>No controllable fans or pumps were found. The hardware library's driver is not available to this process, which is what hides them; use Enable elevated readings in Macro Deck's issue list, or start Macro Deck as an administrator, to make them appear.</value>
   </data>
   <data name="Actions.ControlsUnavailable" xml:space="preserve">
     <value>The controllable fans or pumps could not be read. The hardware library reported an error.</value>
@@ -77,7 +89,7 @@
     <value>Set fan speed</value>
   </data>
   <data name="Actions.SetFanSpeed.Description" xml:space="preserve">
-    <value>Sets a controllable fan or pump to a percentage of its range. The hardware library's driver must be loaded, which needs Macro Deck to run as administrator.</value>
+    <value>Sets a controllable fan or pump to a percentage of its range. The hardware library's driver must be loaded, which needs the elevated hardware helper or Macro Deck running as administrator.</value>
   </data>
   <data name="Actions.SetFanSpeed.Percent.Label" xml:space="preserve">
     <value>Speed</value>
@@ -101,6 +113,6 @@
     <value>That sensor is no longer known to the plugin.</value>
   </data>
   <data name="Variables.Write.Unavailable" xml:space="preserve">
-    <value>The sensor cannot be controlled right now. Fan control needs Macro Deck to run as administrator with the hardware driver loaded.</value>
+    <value>The sensor cannot be controlled right now. Fan control needs the elevated hardware helper, or Macro Deck running as administrator, with the hardware driver loaded.</value>
   </data>
 </root>

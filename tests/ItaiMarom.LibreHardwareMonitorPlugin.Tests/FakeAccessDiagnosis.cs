@@ -12,9 +12,10 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
 /// </remarks>
 internal sealed class FakeAccessDiagnosis : IAccessDiagnosis
 {
-	private readonly string? _note;
+	private readonly AccessDiagnosis _diagnosis;
 
-	public FakeAccessDiagnosis(string? note) => _note = note;
+	public FakeAccessDiagnosis(string? note, bool canElevate = false) =>
+		_diagnosis = new AccessDiagnosis(note, canElevate);
 
 	/// <summary>What a driver this process cannot open says, in the shape <see cref="KernelAccess"/> builds it.</summary>
 	public const string NotElevated =
@@ -24,9 +25,9 @@ internal sealed class FakeAccessDiagnosis : IAccessDiagnosis
 	/// <summary>The normal answer: the driver is installed and this process opened it.</summary>
 	public static FakeAccessDiagnosis Reachable() => new(null);
 
-	/// <summary>A machine whose driver this process was refused.</summary>
-	public static FakeAccessDiagnosis Unreachable() => new(NotElevated);
+	/// <summary>A machine whose driver this process was refused, and which an elevated helper could fix.</summary>
+	public static FakeAccessDiagnosis Unreachable() => new(NotElevated, canElevate: true);
 
 	/// <inheritdoc />
-	public string? Describe() => _note;
+	public AccessDiagnosis Diagnose() => _diagnosis;
 }

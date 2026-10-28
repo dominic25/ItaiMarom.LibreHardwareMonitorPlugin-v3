@@ -23,6 +23,7 @@ public sealed class HardwareMonitor : IAsyncDisposable
 {
 	private readonly IHardwareSensorSource _source;
 	private readonly ILogger _logger;
+	private readonly IAccessDiagnosis _diagnosis;
 
 	/// <summary>
 	/// How the loop is timed. Swapped rather than mutated, because the loop reads it between polls and
@@ -44,17 +45,16 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	private bool _isOpen;
 	private bool _disposed;
 
-	/// <summary>
-	/// What to tell the user about the readings this process cannot reach, or null when there is nothing
-	/// to say. Worked out when the hardware is opened, which is the first moment the driver is reached.
-	/// </summary>
-	private string? _accessNote;
-
-	public HardwareMonitor(IHardwareSensorSource source, HardwareMonitorOptions options, ILogger logger)
+	public HardwareMonitor(
+		IHardwareSensorSource source,
+		HardwareMonitorOptions options,
+		ILogger logger,
+		IAccessDiagnosis? diagnosis = null)
 	{
 		_source = source ?? throw new ArgumentNullException(nameof(source));
 		_options = (options ?? throw new ArgumentNullException(nameof(options))).Normalized();
 		_logger = (logger ?? throw new ArgumentNullException(nameof(logger))).ForContext<HardwareMonitor>();
+		_diagnosis = diagnosis ?? new KernelAccessDiagnosis();
 	}
 
 	/// <summary>Whether the polling loop is running.</summary>
@@ -97,7 +97,13 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	/// to say. It is something to put beside the sensors rather than a failure of its own: everything
 	/// that does not go through the hardware library's kernel driver still reads.
 	/// </summary>
-	public string? AccessNote => Volatile.Read(ref _accessNote);
+	/// <remarks>
+	/// Asked on each access rather than remembered from the moment the hardware was opened: an elevated
+	/// helper can start while this monitor is already running, and the answer has to follow that without
+	/// a restart. The diagnosis keeps its own short-lived cache for the local answer, so this stays cheap
+	/// enough to read from a UI path.
+	/// </remarks>
+	public string? AccessNote => _diagnosis.Diagnose().Note;
 
 	/// <summary>
 	/// Replaces the loop's timing, for example with the polling rate a migrated configuration asks for.
@@ -439,13 +445,9 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		_source.Open();
 		_isOpen = true;
 
-		// Asked once per open, because the answer is about this machine and this process. It goes to the
-		// log as well as to the window: the readings it names are absent rather than stale, and nothing
-		// else in the plugin can tell the difference.
-		var note = KernelAccess.Describe();
-		Volatile.Write(ref _accessNote, note);
-
-		if (note is not null)
+		// Logged once per open rather than on every read: the readings it names are absent rather than
+		// stale, and nothing else in the plugin can tell the difference.
+		if (_diagnosis.Diagnose().Note is { } note)
 		{
 			_logger.Warning("{AccessNote}", note);
 		}

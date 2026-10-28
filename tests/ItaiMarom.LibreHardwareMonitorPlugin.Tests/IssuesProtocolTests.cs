@@ -106,6 +106,71 @@ public sealed class IssuesProtocolTests
 	}
 
 	[Test]
+	public async Task The_warning_offers_elevation_when_the_source_can_start_a_helper()
+	{
+		var source = new FakeElevatableSource();
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		SeedSensors(harness, source.Hardware);
+		await harness.InitializeIntegrationsAsync();
+
+		var listed = Response(await harness.Issues.GetIssuesAsync());
+		var issue = listed.GetProperty("issues").EnumerateArray().Single();
+
+		// The button is the fix now, not an explanation of one: one UAC prompt from here rather than a
+		// restart of Macro Deck as an administrator.
+		Assert.That(issue.GetProperty("actionLabel").ToString(), Is.EqualTo("Enable elevated readings"));
+	}
+
+	[Test]
+	public async Task Pressing_the_issue_starts_the_helper_and_dismisses_the_warning()
+	{
+		var source = new FakeElevatableSource();
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		SeedSensors(harness, source.Hardware);
+		await harness.InitializeIntegrationsAsync();
+
+		Assert.That(harness.Context.Notifications.Current, Has.Count.EqualTo(1));
+
+		var resolved = Response(await harness.Issues.ResolveAsync(new IssueResolveArguments
+		{
+			IssueId = MissingReadingsIssueProvider.IssueId,
+		}));
+
+		// The issue's button is the only place a helper is started, and a helper that took over makes
+		// the warning it answered obsolete.
+		Assert.That(source.EnableCount, Is.EqualTo(1));
+		Assert.That(source.IsElevated, Is.True);
+		Assert.That(resolved.GetProperty("success").GetBoolean(), Is.True);
+		Assert.That(resolved.GetProperty("followUp").GetString(), Is.EqualTo("None"));
+		Assert.That(resolved.GetProperty("message").ToString(), Is.EqualTo("Elevated readings are on."));
+		Assert.That(harness.Context.Notifications.Current, Is.Empty);
+	}
+
+	[Test]
+	public async Task A_dismissed_prompt_is_reported_as_a_failure_rather_than_a_silent_success()
+	{
+		var source = new FakeElevatableSource
+		{
+			NextResult = new ElevationResult(ElevationOutcome.Cancelled),
+		};
+
+		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable(), source);
+		SeedSensors(harness, source.Hardware);
+		await harness.InitializeIntegrationsAsync();
+
+		var resolved = Response(await harness.Issues.ResolveAsync(new IssueResolveArguments
+		{
+			IssueId = MissingReadingsIssueProvider.IssueId,
+		}));
+
+		// The user said no at the UAC prompt. The plugin keeps the readings it already has, and the
+		// issue stays up because the readings it describes are still missing.
+		Assert.That(resolved.GetProperty("success").GetBoolean(), Is.False);
+		Assert.That(resolved.GetProperty("message").ToString(), Does.Contain("dismissed"));
+		Assert.That(harness.Context.Notifications.Current, Has.Count.EqualTo(1));
+	}
+
+	[Test]
 	public async Task The_warning_is_raised_as_a_notification_when_the_plugin_starts()
 	{
 		await using var harness = CreateHarness(FakeAccessDiagnosis.Unreachable());
@@ -158,9 +223,9 @@ public sealed class IssuesProtocolTests
 	}
 
 	/// <summary>Gives the plugin something to serve, so a warning about readings is about something.</summary>
-	private static void SeedSensors(PluginTestHarness harness)
+	private static void SeedSensors(PluginTestHarness harness, FakeHardwareSensorSource? source = null)
 	{
-		var source = (FakeHardwareSensorSource)harness.Services.GetRequiredService<IHardwareSensorSource>();
+		source ??= (FakeHardwareSensorSource)harness.Services.GetRequiredService<IHardwareSensorSource>();
 		source.Add("CPU", "CPU Total", SensorType.Load, 42f);
 
 		// Through the configuration, because that is the only road a selection has into the integration:
@@ -168,7 +233,9 @@ public sealed class IssuesProtocolTests
 		MigrationTestData.SeedMigratedSensors(harness.Context.Config, source.Sensors[0]);
 	}
 
-	private static PluginTestHarness CreateHarness(IAccessDiagnosis diagnosis) =>
+	private static PluginTestHarness CreateHarness(
+		IAccessDiagnosis diagnosis,
+		IHardwareSensorSource? source = null) =>
 		PluginTestHarness.Create(builder => builder
 
 			// Registered here the same way Program.cs registers it, because the wire carries the resolved
@@ -176,7 +243,7 @@ public sealed class IssuesProtocolTests
 			.UseLocalization(Strings.LocalizationCatalog)
 			.ConfigureServices((_, services) =>
 			{
-				services.AddSingleton<IHardwareSensorSource>(new FakeHardwareSensorSource());
+				services.AddSingleton(source ?? new FakeHardwareSensorSource());
 				services.AddSingleton<SensorSelection>();
 				services.AddSingleton(diagnosis);
 			})

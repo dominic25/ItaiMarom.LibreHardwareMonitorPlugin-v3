@@ -61,6 +61,7 @@ public sealed class LibreHardwareMonitorIntegration :
 	private readonly SensorSelection _selection;
 	private readonly SensorVariableProvider _variables;
 	private readonly MissingReadingsIssueProvider _issues;
+	private readonly IHardwareElevation? _elevation;
 	private readonly IPluginCatalogNotifier _catalogNotifier;
 	private readonly ClassicWindowServer _window;
 	private readonly ILogger _logger;
@@ -70,6 +71,12 @@ public sealed class LibreHardwareMonitorIntegration :
 	/// Null until the plugin has been initialized, which is also when there is no session to tell.
 	/// </summary>
 	private IVariableApi? _variableApi;
+
+	/// <summary>
+	/// The host's notification surface, captured at initialize so starting a helper can dismiss the
+	/// warning it has just made obsolete. Null until the plugin has been initialized.
+	/// </summary>
+	private IUserNotifier? _notifications;
 
 	public LibreHardwareMonitorIntegration(
 		ILogger logger,
@@ -81,10 +88,18 @@ public sealed class LibreHardwareMonitorIntegration :
 		_logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		_catalogNotifier = catalogNotifier ?? throw new ArgumentNullException(nameof(catalogNotifier));
 
-		_hardware = new HardwareMonitor(source, HardwareMonitorOptions.Default, _logger);
+		// The source is the one place that knows whether an elevated helper can be started, so it is
+		// also the one place the issue asks. A source that is not elevatable - the test fake, say -
+		// simply has no button beyond the sensor window.
+		_elevation = source as IHardwareElevation;
+
+		// The diagnosis has to see the source: once a helper is serving the hardware, this process
+		// cannot answer whether the driver is reachable, and the helper's own answer is the one that
+		// counts.
+		_hardware = new HardwareMonitor(source, HardwareMonitorOptions.Default, _logger, diagnosis);
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
 		_variables = new SensorVariableProvider(_hardware, selection);
-		_issues = new MissingReadingsIssueProvider(diagnosis);
+		_issues = new MissingReadingsIssueProvider(diagnosis, _elevation);
 		Actions =
 		[
 			new SetFanSpeedAction(_hardware, _logger),
@@ -179,13 +194,50 @@ public sealed class LibreHardwareMonitorIntegration :
 		Task.FromResult(_issues.Issues());
 
 	/// <summary>
-	/// The answer to the issue's button: it opens the settings screen, which is where the sensor window
-	/// and the live values are.
+	/// The answer to the issue's button. When elevation is what is missing, this is where the helper is
+	/// started: the UAC prompt belongs to this click, not to every Macro Deck start. A dismissed prompt
+	/// or a failed launch leaves the plugin in the limited mode it was already in, and the issue says
+	/// which of those happened rather than pretending the readings came back.
 	/// </summary>
-	public Task<IssueResolution> ResolveIssueAsync(
+	public async Task<IssueResolution> ResolveIssueAsync(
 		string issueId,
-		CancellationToken cancellationToken = default) =>
-		Task.FromResult(MissingReadingsIssueProvider.Resolve(issueId));
+		CancellationToken cancellationToken = default)
+	{
+		if (issueId != MissingReadingsIssueProvider.IssueId)
+		{
+			return MissingReadingsIssueProvider.Unknown();
+		}
+
+		if (!_issues.CanElevate || _elevation is not { } elevation)
+		{
+			return MissingReadingsIssueProvider.OpenSensorWindow();
+		}
+
+		var result = await elevation.EnableAsync(cancellationToken).ConfigureAwait(false);
+
+		switch (result.Outcome)
+		{
+			case ElevationOutcome.Enabled:
+				// The warning the user just acted on is no longer true. The issue list follows the
+				// diagnosis and clears itself the next time the host asks; the notification would sit
+				// there until it was dismissed by hand.
+				Volatile.Read(ref _notifications)?.Dismiss(MissingReadingsIssueProvider.IssueId);
+
+				// A helper changes what the catalog can offer - fans and the driver-backed readings -
+				// and the host described this plugin before any of that existed.
+				_catalogNotifier.CatalogChanged(CapabilityKinds.Variables, reason: "elevated readings");
+				return MissingReadingsIssueProvider.Elevated(result.AccessNote);
+
+			case ElevationOutcome.Cancelled:
+				return MissingReadingsIssueProvider.ElevationCancelled();
+
+			default:
+				_logger.Warning(
+					"The elevated hardware helper could not be started: {Error}",
+					result.Error ?? "no reason was reported");
+				return MissingReadingsIssueProvider.ElevationFailed();
+		}
+	}
 
 	/// <summary>
 	/// Reads what a migration left behind, points the loop at those sensors and starts it. Runs once the
@@ -197,6 +249,7 @@ public sealed class LibreHardwareMonitorIntegration :
 		ArgumentNullException.ThrowIfNull(context);
 
 		Volatile.Write(ref _variableApi, context.Variables);
+		Volatile.Write(ref _notifications, context.Notifications);
 
 		// What the host holds is the whole of what this plugin is configured with, so it is read on every
 		// initialize rather than cached: an entry the user removed has to stop being a variable.
@@ -241,6 +294,7 @@ public sealed class LibreHardwareMonitorIntegration :
 	public async Task ShutdownAsync()
 	{
 		Volatile.Write(ref _variableApi, null);
+		Volatile.Write(ref _notifications, null);
 		await _hardware.StopAsync().ConfigureAwait(false);
 	}
 

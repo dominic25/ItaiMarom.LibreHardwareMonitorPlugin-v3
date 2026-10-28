@@ -1,13 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <!-- A Macro Deck 3 plugin is an out-of-process console app, not a class library loaded into
-             the host. -->
-        <OutputType>Exe</OutputType>
+        <!-- A Macro Deck 3 plugin is an out-of-process app, not a class library loaded into the host.
+             WinExe rather than Exe because the same binary is started as the elevated hardware helper,
+             and that copy must not open a console window on the user's desktop. -->
+        <OutputType>WinExe</OutputType>
         <!-- Pinned rather than taken from the project file name: manifest.json declares this executable
              name, and the generated Strings class lives in this namespace. -->
         <AssemblyName>ItaiMarom.LibreHardwareMonitorPlugin</AssemblyName>
         <RootNamespace>ItaiMarom.LibreHardwareMonitorPlugin</RootNamespace>
+        <!-- The UAC prompt names the file description and product, not the assembly name. Without these
+             the prompt for the elevated helper would say "ItaiMarom.LibreHardwareMonitorPlugin". -->
+        <AssemblyTitle>Libre Hardware Monitor</AssemblyTitle>
+        <Product>Libre Hardware Monitor</Product>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(PluginTestBuild)' == 'true'">
+        <!-- A test package is installed next to the store package, and Macro Deck variable names are
+             global: the second plugin to declare core_max_temperature is refused, and with it every
+             other variable. build-packages.ps1 sets this property for the test package only, so the
+             test build namespaces its variables instead of losing them. -->
+        <DefineConstants>$(DefineConstants);LHM_TEST_BUILD</DefineConstants>
     </PropertyGroup>
 
     <ItemGroup>

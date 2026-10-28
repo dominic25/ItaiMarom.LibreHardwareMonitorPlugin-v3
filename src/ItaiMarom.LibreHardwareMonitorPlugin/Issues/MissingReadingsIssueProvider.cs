@@ -24,6 +24,12 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Issues;
 /// chrome around it - the title the issue is filed under, the button, the answer the button gives - lives
 /// in <c>Strings</c> with everything else the host displays.
 /// </para>
+/// <para>
+/// The button changes with the diagnosis. A process that is simply unelevated can be fixed from here,
+/// because the source can start an elevated helper; a driver that is absent, or one that will not open
+/// even for an administrator, cannot, and the button opens the sensor window so the same sentence is
+/// explained where the values are.
+/// </para>
 /// </remarks>
 internal sealed class MissingReadingsIssueProvider
 {
@@ -34,16 +40,28 @@ internal sealed class MissingReadingsIssueProvider
 	internal const string IssueId = "readings-missing";
 
 	private readonly IAccessDiagnosis _diagnosis;
+	private readonly IHardwareElevation? _elevation;
 
-	public MissingReadingsIssueProvider(IAccessDiagnosis diagnosis) =>
+	public MissingReadingsIssueProvider(IAccessDiagnosis diagnosis, IHardwareElevation? elevation = null)
+	{
 		_diagnosis = diagnosis ?? throw new ArgumentNullException(nameof(diagnosis));
+		_elevation = elevation;
+	}
 
 	/// <summary>
 	/// What this process cannot read right now, asked when the host asks rather than remembered from
 	/// start-up: starting Macro Deck again as an administrator clears it, and the answer has to follow
 	/// that without waiting for the next reconnect.
 	/// </summary>
-	internal string? Note => _diagnosis.Describe();
+	internal string? Note => _diagnosis.Diagnose().Note;
+
+	/// <summary>
+	/// Whether the issue's button can start an elevated helper, as opposed to only opening the sensor
+	/// window. A helper that is already running has nothing left to enable, and a diagnosis that is not
+	/// about elevation - a missing driver, say - is not something the button can fix.
+	/// </summary>
+	internal bool CanElevate =>
+		_elevation is { IsElevated: false } && _diagnosis.Diagnose().CanElevate;
 
 	/// <summary>
 	/// The issue, or nothing. Nothing is the normal answer - it means this machine's readings are all
@@ -51,11 +69,13 @@ internal sealed class MissingReadingsIssueProvider
 	/// </summary>
 	public IReadOnlyList<IntegrationIssue> Issues()
 	{
-		var note = Note;
-		if (note is null)
+		var diagnosis = _diagnosis.Diagnose();
+		if (diagnosis.Note is not { } note)
 		{
 			return [];
 		}
+
+		var canElevate = diagnosis.CanElevate && _elevation is { IsElevated: false };
 
 		return
 		[
@@ -65,21 +85,44 @@ internal sealed class MissingReadingsIssueProvider
 				Title = Strings.Issues.ReadingsMissing.Title(),
 				Description = LocalizedText.FromLiteral(note),
 				Severity = IntegrationIssueSeverity.Warning,
-				ActionLabel = Strings.Issues.ReadingsMissing.Action(),
+				ActionLabel = canElevate
+					? Strings.Issues.ReadingsMissing.EnableAction()
+					: Strings.Issues.ReadingsMissing.Action(),
 			},
 		];
 	}
 
 	/// <summary>
-	/// The answer to the issue's button. It opens the sensor window, which is where the values are live
-	/// and where the same sentence is printed over the tree, so the follow-up hands the host the
-	/// configuration flow rather than claiming the readings were fixed - they are only fixed by starting
-	/// Macro Deck again as an administrator, which the description says.
+	/// The answer to the issue's button when this machine cannot be helped by elevation: it opens the
+	/// sensor window, which is where the values are live and where the same sentence is printed over the
+	/// tree. The follow-up hands the host the configuration flow rather than claiming the readings were
+	/// fixed - a missing driver is only fixed by installing it.
 	/// </summary>
-	internal static IssueResolution Resolve(string issueId) =>
-		issueId == IssueId
-			? IssueResolution.Ok(Strings.Issues.ReadingsMissing.Resolved(), IssueResolutionFollowUp.StartConfigFlow)
-			: IssueResolution.Failed(Strings.Issues.ReadingsMissing.Unknown());
+	internal static IssueResolution OpenSensorWindow() =>
+		IssueResolution.Ok(Strings.Issues.ReadingsMissing.Resolved(), IssueResolutionFollowUp.StartConfigFlow);
+
+	/// <summary>The answer to an id this plugin does not report.</summary>
+	internal static IssueResolution Unknown() =>
+		IssueResolution.Failed(Strings.Issues.ReadingsMissing.Unknown());
+
+	/// <summary>
+	/// The answer after the helper took over. A helper that can read everything leaves no note; one that
+	/// still cannot - a driver that will not open even for an administrator - carries the sentence that
+	/// says so, because the issue has to stay up and explain itself.
+	/// </summary>
+	internal static IssueResolution Elevated(string? accessNote) =>
+		IssueResolution.Ok(
+			accessNote is null
+				? Strings.Issues.ReadingsMissing.Elevated()
+				: LocalizedText.FromLiteral(accessNote));
+
+	/// <summary>The answer when the user dismissed the UAC prompt: the plugin keeps its limited mode.</summary>
+	internal static IssueResolution ElevationCancelled() =>
+		IssueResolution.Failed(Strings.Issues.ReadingsMissing.ElevationCancelled());
+
+	/// <summary>The answer when the helper could not be started, or could not take the hardware over.</summary>
+	internal static IssueResolution ElevationFailed() =>
+		IssueResolution.Failed(Strings.Issues.ReadingsMissing.ElevationFailed());
 
 	/// <summary>
 	/// The same warning as a notification, for the moment the plugin starts. The issue waits to be looked
