@@ -51,7 +51,7 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 			// it just never listed what it found down there.
 			Update(hardware);
 
-			foreach (var (sensor, native) in Walk(hardware, RootOf(hardware)))
+			foreach (var (sensor, native) in SensorsOf(hardware))
 			{
 				sensors.Add(new HardwareSensor(sensor, Finite(native.Value), Range(native)));
 			}
@@ -71,7 +71,7 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 			// Which sensors carry a control is the library's answer, not the sensor type's: a super-I/O
 			// chip exposes a Control sensor of its own beside the fan's RPM sensor, and only that one has
 			// an IControl behind it.
-			controls.AddRange(Walk(hardware, RootOf(hardware))
+			controls.AddRange(SensorsOf(hardware)
 				.Where(entry => entry.Native.Control is not null)
 				.Select(entry => entry.Sensor));
 		}
@@ -167,7 +167,7 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 	/// <summary>
 	/// Walks a device and everything below it, pairing each sensor with the identity the plugin keys it
 	/// by and with the library's own <see cref="ISensor"/> - the only thing that knows whether the sensor
-	/// carries a control.
+	/// carries a control. Unlike <see cref="SensorsOf"/>, the library's ids are handed on untouched.
 	/// </summary>
 	private static IEnumerable<(SensorIdentifier Sensor, ISensor Native)> Walk(
 		IHardware hardware,
@@ -196,6 +196,20 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 	}
 
 	/// <summary>
+	/// Every sensor of one top-level device, under the ids the plugin keys by. A repeat the library
+	/// reports is settled by <see cref="UniqueSensorIds"/> here, before anything is built from it.
+	/// </summary>
+	private static IEnumerable<(SensorIdentifier Sensor, ISensor Native)> SensorsOf(IHardware hardware)
+	{
+		var ids = new UniqueSensorIds();
+
+		foreach (var (sensor, native) in Walk(hardware, RootOf(hardware)))
+		{
+			yield return (ids.Apply(sensor), native);
+		}
+	}
+
+	/// <summary>
 	/// Finds the control a write names. There is no <see cref="Update"/> here on purpose: a control is
 	/// attached to its sensor when the hardware is created, and its range belongs to the chip, so a write
 	/// depends on nothing a poll refreshes.
@@ -204,7 +218,7 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 	{
 		foreach (var hardware in _computer.Hardware)
 		{
-			foreach (var (sensor, native) in Walk(hardware, RootOf(hardware)))
+			foreach (var (sensor, native) in SensorsOf(hardware))
 			{
 				if (native.Control is { } control
 					&& string.Equals(sensor.Id, sensorId, StringComparison.Ordinal))

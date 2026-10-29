@@ -15,8 +15,10 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 /// </param>
 /// <param name="Id">
 /// The hardware library's own sensor identifier, for example <c>/lpc/nct6776f/0/temperature/1</c>. It is
-/// the one part of a sensor that is both unique and unchanged across restarts, so it - not the display
-/// name - is what the generated variable id is derived from.
+/// the one part of a sensor that stays the same across restarts, so it - not the display name - is what
+/// the generated variable id is derived from. The library does not always make it unique: a graphics
+/// card can report two sensors under one index, and <see cref="UniqueSensorIds"/> settles the repeat
+/// with a numeric suffix before anything is keyed by it.
 /// </param>
 /// <param name="SensorName">The library's sensor name, for example <c>CPU Core #1</c>.</param>
 /// <param name="SensorType">The kind of reading, which also decides how the value is formatted.</param>
