@@ -3,11 +3,10 @@
     <PropertyGroup>
         <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
         <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
-        <!-- One knob for every Macro Deck package. The Macro Deck 3 SDK is still prerelease and its
-             surface moves between builds, so the version is pinned to an exact build for reproducible
-             plugin releases. Override it for a one-off build against a locally packed SDK:
+        <!-- One knob for every Macro Deck package. The version is pinned to an exact build for
+             reproducible plugin releases. Override it for a one-off build against a locally packed SDK:
              `dotnet build -p:MacroDeckSdkVersion=<version>`. -->
-        <MacroDeckSdkVersion Condition="'$(MacroDeckSdkVersion)' == ''">3.0.0-beta.18</MacroDeckSdkVersion>
+        <MacroDeckSdkVersion Condition="'$(MacroDeckSdkVersion)' == ''">3.0.0</MacroDeckSdkVersion>
     </PropertyGroup>
 
     <ItemGroup>
