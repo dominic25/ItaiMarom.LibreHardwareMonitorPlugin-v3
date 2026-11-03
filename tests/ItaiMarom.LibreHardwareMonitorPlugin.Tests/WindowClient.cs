@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using NUnit.Framework;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
@@ -64,7 +65,8 @@ internal static class WindowClient
 		IEnumerable<string> resourceIds,
 		double? polling = null,
 		bool autoElevate = false,
-		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null)
+		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null,
+		IEnumerable<(string Sensor, SensorUnit Unit)>? units = null)
 	{
 		var fields = resourceIds
 			.Select(resourceId => new KeyValuePair<string, string>("sensors", resourceId))
@@ -91,6 +93,14 @@ internal static class WindowClient
 			fields.Add(new KeyValuePair<string, string>("remote_name", name ?? string.Empty));
 			fields.Add(new KeyValuePair<string, string>("remote_url", url ?? string.Empty));
 			fields.Add(new KeyValuePair<string, string>("remote_key", key ?? string.Empty));
+		}
+
+		foreach (var (sensor, unit) in units ?? [])
+		{
+			// Every unit selector carries its sensor's id in a hidden field beside it, so the two
+			// parallel lists the form posts stay aligned even where a kind offers no selector.
+			fields.Add(new KeyValuePair<string, string>("unit_sensor", sensor));
+			fields.Add(new KeyValuePair<string, string>("unit_value", unit.ToString()));
 		}
 
 		return await PostAsync(windowUri, fields).ConfigureAwait(false);

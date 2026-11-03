@@ -130,7 +130,7 @@ public sealed class LibreHardwareMonitorIntegration :
 		// The classic sensor window is served for the whole life of the plugin rather than for one
 		// session: a flow is handed out per session and has nowhere to release it, and the listener binds
 		// its port lazily, so a plugin nobody configures never listens at all.
-		_window = new ClassicWindowServer(_logger, new SensorReadingSource(_hardware));
+		_window = new ClassicWindowServer(_logger, new SensorReadingSource(_hardware, selection));
 		Migrations = [new MacroDeck2Migration(_hardware, _logger)];
 	}
 

@@ -87,6 +87,18 @@ public sealed class SensorIdentifierTests
 	}
 
 	[Test]
+	public void The_unit_a_sensor_is_shown_in_is_not_part_of_a_sensor_s_identity()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+		var fahrenheit = sensor with { DisplayUnit = SensorUnit.Fahrenheit };
+
+		// The identity keys dictionaries and the stored selection, so choosing Fahrenheit must not make
+		// the same sensor look like a different one and split its reading out of the cache.
+		Assert.That(fahrenheit, Is.EqualTo(sensor));
+		Assert.That(fahrenheit.GetHashCode(), Is.EqualTo(sensor.GetHashCode()));
+	}
+
+	[Test]
 	public void The_display_name_carries_the_kind_because_the_name_alone_is_ambiguous()
 	{
 		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);

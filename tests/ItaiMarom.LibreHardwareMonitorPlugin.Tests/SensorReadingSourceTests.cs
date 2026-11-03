@@ -1,5 +1,6 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 using LibreHardwareMonitor.Hardware;
 using NUnit.Framework;
 
@@ -32,6 +33,48 @@ public sealed class SensorReadingSourceTests
 
 		Assert.That(values, Has.Count.EqualTo(1));
 		Assert.That(values[sensor.ResourceId], Is.Null);
+	}
+
+	[Test]
+	public void A_sensor_is_shown_in_the_unit_the_window_chose_for_it()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+
+		var values = SensorReadingSource.ValuesOf(
+			[new HardwareSensor(sensor, 50f)],
+			new Dictionary<string, SensorUnit>(StringComparer.Ordinal)
+			{
+				[sensor.ResourceId] = SensorUnit.Fahrenheit,
+			});
+
+		// The hardware source knows nothing about the selection, so the window has to be given the unit
+		// separately or the reading and the selector beside it would disagree.
+		Assert.That(values[sensor.ResourceId], Is.EqualTo("122 °F"));
+	}
+
+	[Test]
+	public void The_units_a_selection_carries_are_keyed_the_way_the_window_names_a_sensor()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature)
+			with { DisplayUnit = SensorUnit.Fahrenheit };
+		var selection = new SensorSelection();
+		selection.Replace([sensor]);
+
+		var units = SensorReadingSource.UnitsOf(selection);
+
+		Assert.That(units, Is.Not.Null);
+		Assert.That(units![sensor.ResourceId], Is.EqualTo(SensorUnit.Fahrenheit));
+	}
+
+	[Test]
+	public void A_selection_with_no_chosen_units_carries_none()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+		var selection = new SensorSelection();
+		selection.Replace([sensor]);
+
+		Assert.That(SensorReadingSource.UnitsOf(selection), Is.Null);
+		Assert.That(SensorReadingSource.UnitsOf(null), Is.Null);
 	}
 
 	[Test]

@@ -142,8 +142,14 @@ internal static class ClassicWindowPage
 		details details { margin-left: 20px; border-left: 1px solid var(--line); }
 		summary .kind { font-weight: 500; color: var(--dim); }
 		ul { list-style: none; margin: 0; padding: 0 0 4px 34px; }
-		li { margin: 1px 0; }
-		li label { display: flex; align-items: center; gap: 9px; padding: 5px 10px; border-radius: 5px; cursor: pointer; }
+		li { display: flex; align-items: center; gap: 8px; margin: 1px 0; }
+		li label { display: flex; align-items: center; gap: 9px; padding: 5px 10px; border-radius: 5px; cursor: pointer; flex: 1; min-width: 0; }
+		.unit { flex: none; }
+		.unit select {
+			padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px;
+			background: var(--bg); color: var(--text); font: inherit;
+		}
+		.unit select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 		li label:hover { background: var(--panel); }
 		li.hidden, .hidden { display: none; }
 		input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; flex: none; }
@@ -475,6 +481,7 @@ internal static class ClassicWindowPage
 
 		var selected = opening.SelectedResourceIds.ToHashSet(StringComparer.Ordinal);
 		var values = opening.Values ?? EmptyValues;
+		var units = opening.DisplayUnits;
 		var builder = new StringBuilder();
 
 		foreach (var root in categories.GroupBy(category => category.RootName, StringComparer.Ordinal))
@@ -505,7 +512,11 @@ internal static class ClassicWindowPage
 				builder.Append("\t\t\t<ul>\n");
 				foreach (var sensor in category.Sensors)
 				{
-					AppendSensor(builder, sensor, selected.Contains(sensor.ResourceId), values);
+					var unit = units is not null && units.TryGetValue(sensor.ResourceId, out var chosen)
+						? chosen
+						: sensor.DisplayUnit;
+
+					AppendSensor(builder, sensor, selected.Contains(sensor.ResourceId), values, unit);
 				}
 
 				builder.Append("\t\t\t</ul>\n\t\t</details>\n");
@@ -571,7 +582,8 @@ internal static class ClassicWindowPage
 		StringBuilder builder,
 		SensorIdentifier sensor,
 		bool ticked,
-		IReadOnlyDictionary<string, string?> values)
+		IReadOnlyDictionary<string, string?> values,
+		SensorUnit? unit)
 	{
 		builder.Append("\t\t\t<li><label><input type=\"checkbox\" name=\"sensors\" value=\"")
 			.Append(WebUtility.HtmlEncode(sensor.ResourceId))
@@ -584,7 +596,48 @@ internal static class ClassicWindowPage
 		AppendControlBadge(builder, sensor);
 
 		builder.Append(ValueCell(sensor, values))
-			.Append("</label></li>\n");
+			.Append("</label>");
+
+		AppendUnitSelector(builder, sensor, unit);
+
+		builder.Append("</li>\n");
+	}
+
+	/// <summary>
+	/// The unit selector for a kind that offers more than one. The sensor's resource id travels in the
+	/// hidden field next to it, so the two lists the form posts stay aligned even where a kind - a fan
+	/// speed, a voltage - has no selector at all.
+	/// </summary>
+	private static void AppendUnitSelector(StringBuilder builder, SensorIdentifier sensor, SensorUnit? unit)
+	{
+		var options = SensorUnits.OptionsFor(sensor.SensorType);
+		if (options.Count == 0)
+		{
+			return;
+		}
+
+		var chosen = unit is { } candidate && SensorUnits.IsValidFor(sensor.SensorType, candidate)
+			? candidate
+			: SensorUnits.DefaultFor(sensor.SensorType);
+
+		builder.Append("<span class=\"unit\"><input type=\"hidden\" name=\"unit_sensor\" value=\"")
+			.Append(WebUtility.HtmlEncode(sensor.ResourceId))
+			.Append("\"><select name=\"unit_value\" aria-label=\"Unit for ")
+			.Append(WebUtility.HtmlEncode(sensor.LegacyToken))
+			.Append("\">");
+
+		foreach (var option in options)
+		{
+			builder.Append("<option value=\"")
+				.Append(option.ToString())
+				.Append('"')
+				.Append(option == chosen ? " selected" : string.Empty)
+				.Append('>')
+				.Append(WebUtility.HtmlEncode(SensorUnits.Symbol(option)))
+				.Append("</option>");
+		}
+
+		builder.Append("</select></span>");
 	}
 
 	/// <summary>

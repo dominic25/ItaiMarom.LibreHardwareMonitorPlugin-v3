@@ -101,7 +101,7 @@ internal static class RemoteSensorParser
 			var name = string.IsNullOrWhiteSpace(node.Text) ? sensorId : node.Text.Trim();
 			sensors.Add(new HardwareSensor(
 				ids.Apply(new SensorIdentifier(location, prefix + sensorId, name, kind)),
-				ValueOf(node)));
+				ValueOf(node, kind)));
 		}
 
 		if (node.Children is not { Count: > 0 } children)
@@ -139,30 +139,36 @@ internal static class RemoteSensorParser
 	}
 
 	/// <summary>
-	/// The reading a sensor reports. The raw value is preferred because it is the number itself; text is
-	/// a fallback for a document from a server that only sent the formatted form. Either can arrive as a
-	/// number or as formatted text depending on the server's version - the Remote Web Server has shipped
-	/// both - so both shapes are read here.
+	/// The reading a sensor reports, in the unit this plugin caches. The raw value is preferred because
+	/// it is the number itself; text is a fallback for a document from a server that only sent the
+	/// formatted form. Either can arrive as a number or as formatted text depending on the server's
+	/// version - the Remote Web Server has shipped both - so both shapes are read here.
 	/// </summary>
-	private static float? ValueOf(RemoteNode node)
+	/// <remarks>
+	/// A formatted reading carries its unit (<c>12.2 GB</c>, <c>53.0 KB/s</c>), and that is not the unit
+	/// the plugin caches: the library reports a size in bytes and a rate in bytes per second. The suffix
+	/// is therefore undone here, before the value reaches the cache, so it is converted exactly once.
+	/// </remarks>
+	private static float? ValueOf(RemoteNode node, SensorType kind)
 	{
-		if (TryReadNumber(node.RawValue, out var raw))
+		if (TryReadNumber(node.RawValue, out var raw, out var rawUnit))
 		{
-			return Finite(raw);
+			return Finite(SensorUnits.FromReported(kind, raw, rawUnit));
 		}
 
-		if (!TryReadNumber(node.Value, out var formatted))
+		if (!TryReadNumber(node.Value, out var formatted, out var formattedUnit))
 		{
 			return null;
 		}
 
-		return Finite(formatted);
+		return Finite(SensorUnits.FromReported(kind, formatted, formattedUnit));
 	}
 
 	/// <summary>Reads a node's <c>RawValue</c>, which is a JSON number in one version and text in another.</summary>
-	private static bool TryReadNumber(JsonElement? element, out double value)
+	private static bool TryReadNumber(JsonElement? element, out double value, out string? unit)
 	{
 		value = 0;
+		unit = null;
 
 		if (element is not { } raw)
 		{
@@ -172,18 +178,20 @@ internal static class RemoteSensorParser
 		return raw.ValueKind switch
 		{
 			JsonValueKind.Number => raw.TryGetDouble(out value),
-			JsonValueKind.String => TryReadNumber(raw.GetString(), out value),
+			JsonValueKind.String => TryReadNumber(raw.GetString(), out value, out unit),
 			_ => false,
 		};
 	}
 
 	/// <summary>
-	/// The first number in formatted text such as <c>51.0 °C</c> or <c>0,696 V</c>. A named floating
-	/// point literal, <c>NaN</c>, or an infinity has no number to read and is no reading.
+	/// The first number in formatted text such as <c>51.0 °C</c> or <c>0,696 V</c>, and whatever follows
+	/// it - the unit the number is in. A named floating point literal, <c>NaN</c>, or an infinity has no
+	/// number to read and is no reading.
 	/// </summary>
-	private static bool TryReadNumber(string? text, out double value)
+	private static bool TryReadNumber(string? text, out double value, out string? unit)
 	{
 		value = 0;
+		unit = null;
 
 		if (string.IsNullOrWhiteSpace(text))
 		{
@@ -204,7 +212,13 @@ internal static class RemoteSensorParser
 			? token.Replace(",", string.Empty, StringComparison.Ordinal)
 			: token.Replace(',', '.');
 
-		return double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+		if (!double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+		{
+			return false;
+		}
+
+		unit = text[(match.Index + match.Length)..].Trim();
+		return true;
 	}
 
 	/// <summary>A finite <see cref="float" />, or null when the number cannot be one.</summary>

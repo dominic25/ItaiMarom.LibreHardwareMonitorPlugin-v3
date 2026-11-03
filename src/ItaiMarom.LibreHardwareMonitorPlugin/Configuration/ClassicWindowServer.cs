@@ -26,6 +26,10 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 /// The remote machines the window opens its editor on. They are read from and written to the same form
 /// as the sensors, so one save carries the whole configuration.
 /// </param>
+/// <param name="DisplayUnits">
+/// The unit each configured sensor is shown in, keyed by resource id. The window opens its selectors on
+/// these so pressing Save without touching one cannot change the unit by accident.
+/// </param>
 internal sealed record ClassicWindowOpening(
 	string Title,
 	IReadOnlyList<SensorCategory> Categories,
@@ -38,7 +42,8 @@ internal sealed record ClassicWindowOpening(
 	string? Notice = null,
 	IReadOnlyDictionary<string, string?>? Values = null,
 	bool AutoElevate = false,
-	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null);
+	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null,
+	IReadOnlyDictionary<string, SensorUnit>? DisplayUnits = null);
 
 /// <summary>One remote machine as the window's form carried it back, before it is validated.</summary>
 internal sealed record ClassicWindowRemote(string? Name, string? Url, string? Key);
@@ -48,7 +53,8 @@ internal sealed record ClassicWindowPayload(
 	IReadOnlyList<string> ResourceIds,
 	double? PollingMilliseconds,
 	bool AutoElevate,
-	IReadOnlyList<ClassicWindowRemote>? Remotes = null);
+	IReadOnlyList<ClassicWindowRemote>? Remotes = null,
+	IReadOnlyDictionary<string, SensorUnit>? Units = null);
 
 /// <summary>
 /// A loopback-only web server with one job: serve the Macro Deck 2 dialog rebuilt as a page, and collect
@@ -451,7 +457,8 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 			// A checkbox is submitted only while it is ticked, so its presence is the whole answer.
 			form.ContainsKey("auto_elevate"),
-			ReadRemotes(form));
+			ReadRemotes(form),
+			ReadUnits(form));
 
 		_logger.Information(
 			"The classic sensor window saved {SensorCount} sensors.",
@@ -523,6 +530,35 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		}
 
 		return remotes;
+	}
+
+	/// <summary>
+	/// The unit selectors, two parallel lists joined back into a sensor-to-unit map. The resource id
+	/// travels in a hidden field beside its selector, so a unit can never be applied to the next row when
+	/// one sensor has no choice to offer.
+	/// </summary>
+	/// <remarks>
+	/// A value that is not a unit this version knows is ignored rather than stored: the sensor keeps the
+	/// library's own unit, which is the safe answer and costs only the user's choice until they pick again.
+	/// </remarks>
+	private static Dictionary<string, SensorUnit> ReadUnits(Dictionary<string, List<string>> form)
+	{
+		var sensors = ValuesOf(form, "unit_sensor");
+		var values = ValuesOf(form, "unit_value");
+		var count = Math.Min(sensors.Count, values.Count);
+		var units = new Dictionary<string, SensorUnit>(count, StringComparer.Ordinal);
+
+		for (var index = 0; index < count; index++)
+		{
+			var resourceId = sensors[index];
+			if (!string.IsNullOrWhiteSpace(resourceId)
+				&& SensorUnits.TryParse(values[index], out var unit))
+			{
+				units[resourceId] = unit;
+			}
+		}
+
+		return units;
 	}
 
 	private static List<string> ValuesOf(Dictionary<string, List<string>> form, string name) =>

@@ -47,6 +47,7 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     HardwareLocation.cs                where a sensor sits in the hardware tree
     SensorIdentifier.cs                stable sensor identity and variable naming
     SensorFormatting.cs                how a reading is presented (decimals, unit, semantic kind)
+    SensorUnits.cs                     the display-unit choices, conversions and remote normalization
     HardwareSensor.cs                  one sample from a source
     ControlRange.cs                    the span a sensor's software control accepts
     AggregateHardwareSource.cs         the local machine plus every configured remote one
@@ -138,8 +139,36 @@ plus every configured remote one:
 
 The parser walks the document rather than assuming a depth: the root and machine nodes are grouping nodes,
 hardware nodes carry `HardwareId`, sensors carry `SensorId` and `Type`, and the synthetic `/` id is not a
-device. `RawValue` is preferred over the formatted `Value`; `NaN` and infinities become "no reading".
-Responses are decompressed by the HTTP handler when the server sends gzip.
+device. `RawValue` is preferred over the formatted `Value`; either can arrive as a JSON number or as
+formatted text, and a formatted suffix (`12.2 GB`, `53.0 KB/s`) is scaled back to the plugin's own unit
+before the reading is cached. `NaN` and infinities become "no reading". Responses are decompressed by the
+HTTP handler when the server sends gzip.
+
+## How display units work
+
+The library reports one unit per reading kind - Celsius, native bytes for `Data`, native megabytes for
+`SmallData`, megahertz, bytes per second - and never converts. A user who wants Fahrenheit, gigahertz or
+a rate in KB/s is choosing how to display the reading, not asking the cache to change:
+
+- **The cache keeps the library's unit.** `SensorIdentifier.DisplayUnit` is a display choice beside the
+  identity, not part of it, so a dictionary keyed by identity does not split when a unit changes.
+  `SensorUnits.ToDisplay` converts at the two places that hand a value out - the variable provider and
+  the window's value column - and `SensorFormatting` declares the matching unit and precision.
+- **Not every kind has a choice.** Temperature offers °C/°F, data GB/GiB, small data MB/MiB, clock
+  MHz/GHz, throughput B/s, KB/s and MB/s. Any other kind, and any choice that does not suit the kind it
+  was stored with, falls back to the library's own unit rather than converting twice.
+- **The default is the old plugin's text.** °C, GB, MB, MHz and B/s keep the rendered reading unchanged
+  for a user who never opens the selector.
+- **The choice is stored per sensor.** It travels as `DisplayUnit` on `MigratedSensor` and is restored
+  only when `SensorUnits.IsValidFor` accepts it against the stored kind, so a hand-edited or obsolete
+  document cannot turn a percentage into a size.
+- **The window and the flow agree.** The page posts two parallel lists, `unit_sensor` and `unit_value`,
+  with the resource id in a hidden field beside each selector. `ClassicWindowServer` joins them; the
+  config flow validates them against the sensors it resolved before storing them. The window also opens
+  its selectors on the stored choice, so pressing Save without touching one keeps it.
+- **Remote values are normalized first.** A remote server sends formatted text such as `12.2 GB` or
+  `53.0 KB/s`. `SensorUnits.FromReported` scales the suffix back to the cache's unit before the reading
+  is stored, so the unit choice is applied exactly once and works identically on a remote sensor.
 
 ## How the variables are exposed
 
@@ -442,6 +471,8 @@ Step-by-step port from the Macro Deck 2 plugin:
 - [x] Macro Deck SDK 3.0.0 - the stable SDK packages are pinned in `Directory.Packages.props`.
 - [x] Remote machines - the local hardware plus any number of LibreHardwareMonitor Remote Web Servers,
       read-only, edited in the same sensor window and stored with the sensor selection.
+- [x] Per-sensor display units - °C/°F, GB/GiB, MB/MiB, MHz/GHz and B/s/KB/s/MB/s, chosen beside each
+      reading in the sensor window and stored with the sensor selection.
 
 ## Maybe
 

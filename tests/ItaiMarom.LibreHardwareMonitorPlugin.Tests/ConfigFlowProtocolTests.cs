@@ -406,6 +406,76 @@ public sealed class ConfigFlowProtocolTests
 	}
 
 	[Test]
+	public async Task Saving_the_window_stores_the_unit_each_sensor_was_chosen_in()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var result = await SaveWindowAsync(
+			harness,
+			Session,
+			[cpu.ResourceId],
+			1000,
+			units: [(cpu.ResourceId, SensorUnit.Fahrenheit)]);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.Sensors.Single().DisplayUnit, Is.EqualTo(SensorUnit.Fahrenheit));
+	}
+
+	[Test]
+	public async Task The_window_reopens_on_the_stored_unit()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		var cpu = source.Sensors[0] with { DisplayUnit = SensorUnit.Fahrenheit };
+
+		await using var harness = CreateHarness(source);
+		MigrationTestData.SeedMigratedSensors(harness.Context.Config, cpu);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var page = await WindowClient.ReadPageAsync(await ContinueAsync(harness, Session));
+
+		// Pressing Save without touching the selector has to keep the unit, so what opens must already
+		// be the stored choice.
+		Assert.That(page, Does.Contain("<option value=\"Fahrenheit\" selected>"));
+		Assert.That(page, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+	}
+
+	[Test]
+	public async Task A_unit_that_does_not_suit_the_sensor_is_not_stored()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Total", SensorType.Load, 42f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		// A stale or hand-edited form can carry any unit next to any sensor. A load is a percentage,
+		// not a size, so the choice is dropped rather than making the variable nonsense.
+		var result = await SaveWindowAsync(
+			harness,
+			Session,
+			[cpu.ResourceId],
+			1000,
+			units: [(cpu.ResourceId, SensorUnit.Gigabytes)]);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.Sensors.Single().DisplayUnit, Is.Null);
+	}
+
+	[Test]
 	public async Task A_window_that_was_never_saved_stores_nothing()
 	{
 		await using var harness = CreateHarness(new FakeHardwareSensorSource());
@@ -514,10 +584,11 @@ public sealed class ConfigFlowProtocolTests
 		IReadOnlyCollection<string> ticked,
 		double? polling = null,
 		bool autoElevate = false,
-		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null)
+		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null,
+		IEnumerable<(string Sensor, SensorUnit Unit)>? units = null)
 	{
 		var window = await ContinueAsync(harness, sessionId);
-		var callback = await WindowClient.SaveAsync(window, ticked, polling, autoElevate, remotes);
+		var callback = await WindowClient.SaveAsync(window, ticked, polling, autoElevate, remotes, units);
 
 		return await ResumeAsync(harness, sessionId, callback);
 	}

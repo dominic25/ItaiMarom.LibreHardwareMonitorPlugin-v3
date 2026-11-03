@@ -197,6 +197,84 @@ public sealed class RemoteSensorParserTests
 	}
 
 	[Test]
+	public void A_remote_size_formatted_as_gigabytes_is_cached_as_native_bytes()
+	{
+		var sensors = RemoteSensorParser.Parse(
+			"""
+			{"Children":[{"HardwareId":"/ram","Text":"Memory","Children":[{"SensorId":"/ram/data/0","Type":"Data","Text":"Memory Used","RawValue":"12.2 GB","Value":"12.2 GB"}]}]}
+			""",
+			Source);
+
+		// The plugin caches Data in native bytes and converts it for display, so the server's own
+		// scaling has to be undone first or the reading would be divided a second time.
+		Assert.That(
+			sensors.Single().Value,
+			Is.EqualTo((float)(12.2 * 1024 * 1024 * 1024)));
+	}
+
+	[Test]
+	public void A_remote_rate_formatted_as_kilobytes_is_cached_as_bytes_per_second()
+	{
+		var sensors = RemoteSensorParser.Parse(
+			"""
+			{"Children":[{"HardwareId":"/net","Text":"Network","Children":[{"SensorId":"/net/throughput/0","Type":"Throughput","Text":"Download","RawValue":"53.0 KB/s","Value":"53.0 KB/s"}]}]}
+			""",
+			Source);
+
+		Assert.That(sensors.Single().Value, Is.EqualTo(53f * 1024));
+	}
+
+	[Test]
+	public void A_remote_clock_formatted_as_gigahertz_is_cached_as_megahertz()
+	{
+		var sensors = RemoteSensorParser.Parse(
+			"""
+			{"Children":[{"HardwareId":"/cpu","Text":"CPU","Children":[{"SensorId":"/cpu/clock/0","Type":"Clock","Text":"CPU Core #1","RawValue":"3.7 GHz","Value":"3.7 GHz"}]}]}
+			""",
+			Source);
+
+		Assert.That(sensors.Single().Value, Is.EqualTo(3700f));
+	}
+
+	[Test]
+	public void A_remote_temperature_formatted_in_fahrenheit_is_cached_in_celsius()
+	{
+		var sensors = RemoteSensorParser.Parse(
+			"""
+			{"Children":[{"HardwareId":"/cpu","Text":"CPU","Children":[{"SensorId":"/cpu/temperature/0","Type":"Temperature","Text":"CPU Core #1","RawValue":"120.2 °F","Value":"120.2 °F"}]}]}
+			""",
+			Source);
+
+		Assert.That(sensors.Single().Value, Is.EqualTo(49f));
+	}
+
+	[Test]
+	public void A_remote_small_size_formatted_as_gigabytes_is_cached_in_megabytes()
+	{
+		var sensors = RemoteSensorParser.Parse(
+			"""
+			{"Children":[{"HardwareId":"/gpu","Text":"GPU","Children":[{"SensorId":"/gpu/smalldata/0","Type":"SmallData","Text":"GPU Memory","RawValue":"512 MB","Value":"512 MB"}]}]}
+			""",
+			Source);
+
+		Assert.That(
+			sensors.Single().Value,
+			Is.EqualTo((float)(512 * 1024 * 1024 / 1_000_000d)));
+	}
+
+	[Test]
+	public void A_formatted_value_carries_its_unit_when_the_raw_value_is_missing()
+	{
+		var sensors = RemoteSensorParser.Parse(
+			"""
+			{"Children":[{"HardwareId":"/ram","Text":"Memory","Children":[{"SensorId":"/ram/data/0","Type":"Data","Text":"Memory Used","Value":"1 GB"}]}]}
+			""",
+			Source);
+
+		Assert.That(sensors.Single().Value, Is.EqualTo(1073741824f));
+	}
+
+	[Test]
 	public void A_sensor_with_an_unknown_type_is_left_out()
 	{
 		var sensors = RemoteSensorParser.Parse(

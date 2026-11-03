@@ -148,7 +148,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 				_hardware.AccessNote,
 				values,
 				_autoElevate,
-				_remotes.Remotes));
+				_remotes.Remotes,
+				SensorReadingSource.UnitsOf(_selection)));
 
 			_logger.Information(
 				"The classic sensor window was opened on {SensorCount} sensors at {WindowUri}.",
@@ -186,7 +187,9 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 			return ConfigFlowResult.Error(BuildStep(), Strings.Configuration.WindowLost());
 		}
 
-		var sensors = await ResolveAsync([.. payload.ResourceIds], cancellationToken).ConfigureAwait(false);
+		var sensors = ApplyUnits(
+			await ResolveAsync([.. payload.ResourceIds], cancellationToken).ConfigureAwait(false),
+			payload.Units);
 
 		// A window always posts its interval; if one ever does not, the interval the loop is already
 		// running at is kept rather than dropped, which is what would silently reset it to the default.
@@ -291,7 +294,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		try
 		{
 			return SensorReadingSource.ValuesOf(
-				await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false));
+				await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false),
+				SensorReadingSource.UnitsOf(_selection));
 		}
 		catch (OperationCanceledException)
 		{
@@ -386,6 +390,32 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		}
 
 		return resolved;
+	}
+
+	/// <summary>
+	/// Gives each resolved sensor the unit the window chose for it. A unit the sensor's kind cannot be
+	/// shown in - a stale form, or one edited by hand - is ignored rather than stored, because converting
+	/// a temperature as if it were a size would be worse than dropping the choice.
+	/// </summary>
+	private static IReadOnlyList<SensorIdentifier> ApplyUnits(
+		IReadOnlyList<SensorIdentifier> sensors,
+		IReadOnlyDictionary<string, SensorUnit>? units)
+	{
+		if (units is not { Count: > 0 })
+		{
+			return sensors;
+		}
+
+		var chosen = new List<SensorIdentifier>(sensors.Count);
+		foreach (var sensor in sensors)
+		{
+			chosen.Add(
+				units.TryGetValue(sensor.ResourceId, out var unit) && SensorUnits.IsValidFor(sensor.SensorType, unit)
+					? sensor with { DisplayUnit = unit }
+					: sensor);
+		}
+
+		return chosen;
 	}
 
 	private static List<SensorIdentifier> Map(

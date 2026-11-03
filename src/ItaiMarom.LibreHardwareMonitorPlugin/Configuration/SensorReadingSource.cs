@@ -1,4 +1,5 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 
@@ -25,28 +26,67 @@ internal interface ISensorReadingSource
 internal sealed class SensorReadingSource : ISensorReadingSource
 {
 	private readonly HardwareMonitor _hardware;
+	private readonly SensorSelection? _selection;
 
-	public SensorReadingSource(HardwareMonitor hardware) =>
+	public SensorReadingSource(HardwareMonitor hardware, SensorSelection? selection = null)
+	{
 		_hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
+		_selection = selection;
+	}
 
 	/// <inheritdoc />
 	public async Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(CancellationToken cancellationToken) =>
-		ValuesOf(await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false));
+		ValuesOf(
+			await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false),
+			UnitsOf(_selection));
 
 	/// <summary>
 	/// Turns one read of a machine into the window's pairs. The first sensor under a resource id is the
 	/// one that counts, which is the same rule the window's tree follows when it drops its duplicates.
 	/// </summary>
-	public static IReadOnlyDictionary<string, string?> ValuesOf(IReadOnlyList<HardwareSensor> samples)
+	/// <remarks>
+	/// A sample comes from the hardware source, which knows nothing about the selection, so the unit the
+	/// user chose for a sensor has to be looked up separately. Without that the window would show a
+	/// Fahrenheit setting's Celsius number while the chosen unit sat in the selector beside it.
+	/// </remarks>
+	public static IReadOnlyDictionary<string, string?> ValuesOf(
+		IReadOnlyList<HardwareSensor> samples,
+		IReadOnlyDictionary<string, SensorUnit>? units = null)
 	{
 		ArgumentNullException.ThrowIfNull(samples);
 
 		var values = new Dictionary<string, string?>(samples.Count, StringComparer.Ordinal);
 		foreach (var sample in samples)
 		{
-			values.TryAdd(sample.Sensor.ResourceId, SensorFormatting.Display(sample));
+			var sensor = sample.Sensor;
+			if (units is not null && units.TryGetValue(sensor.ResourceId, out var unit))
+			{
+				sensor = sensor with { DisplayUnit = unit };
+			}
+
+			values.TryAdd(sensor.ResourceId, SensorFormatting.Display(sensor, sample.Value));
 		}
 
 		return values;
+	}
+
+	/// <summary>The units the selection carries, keyed the way the window names a sensor.</summary>
+	public static IReadOnlyDictionary<string, SensorUnit>? UnitsOf(SensorSelection? selection)
+	{
+		if (selection is null)
+		{
+			return null;
+		}
+
+		var units = new Dictionary<string, SensorUnit>(StringComparer.Ordinal);
+		foreach (var sensor in selection.Sensors)
+		{
+			if (sensor.DisplayUnit is { } unit && SensorUnits.IsValidFor(sensor.SensorType, unit))
+			{
+				units[sensor.ResourceId] = unit;
+			}
+		}
+
+		return units.Count > 0 ? units : null;
 	}
 }

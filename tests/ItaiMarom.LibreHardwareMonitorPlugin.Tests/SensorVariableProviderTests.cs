@@ -411,6 +411,26 @@ public sealed class SensorVariableProviderTests
 	}
 
 	[Test]
+	public async Task A_declared_sensor_serves_its_reading_in_the_unit_it_was_chosen_in()
+	{
+		await using var fixture = new Fixture();
+		var sensor = fixture.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f)
+			with { DisplayUnit = SensorUnit.Fahrenheit };
+		fixture.Select(sensor);
+
+		fixture.Watch();
+		fixture.Start();
+		await WaitUntilAsync(() => fixture.Monitor.TryGetReading(sensor, out _));
+
+		var definition = fixture.Provider.Variables.Single();
+		Assert.That(definition.Unit, Is.EqualTo("°F"));
+
+		// The cache holds Celsius, so a Fahrenheit variable that served the cached number would show a
+		// Celsius reading under a Fahrenheit unit.
+		Assert.That(await fixture.Provider.ReadAsync(sensor.VariableId), Is.EqualTo(VariableReading.Of(122d)));
+	}
+
+	[Test]
 	public async Task A_read_never_touches_the_hardware_library()
 	{
 		await using var fixture = new Fixture();

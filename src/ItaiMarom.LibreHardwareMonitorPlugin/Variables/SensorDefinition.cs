@@ -54,8 +54,8 @@ internal static class SensorDefinition
 		return definition with
 		{
 			DisplayName = LocalizedText.FromLiteral(sensor.DisplayName),
-			DecimalPlaces = SensorFormatting.DecimalPlaces(sensor.SensorType),
-			Unit = SensorFormatting.Unit(sensor.SensorType),
+			DecimalPlaces = SensorFormatting.DecimalPlaces(sensor.SensorType, sensor.DisplayUnit),
+			Unit = SensorFormatting.Unit(sensor.SensorType, sensor.DisplayUnit),
 			SemanticKind = SensorFormatting.SemanticKind(sensor.SensorType),
 			RefreshInterval = refreshInterval,
 			Write = sensor.Controllable ? new VariableWriteCapability { CommitOnRelease = true } : null,

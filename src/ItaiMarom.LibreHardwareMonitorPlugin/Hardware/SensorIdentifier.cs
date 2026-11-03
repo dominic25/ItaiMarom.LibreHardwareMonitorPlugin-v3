@@ -194,7 +194,19 @@ public sealed record SensorIdentifier(
 	/// </remarks>
 	public bool Controllable { get; init; }
 
-	/// <summary>Compares the four positional members, and deliberately not <see cref="Controllable"/>.</summary>
+	/// <summary>
+	/// The unit the user picked for this sensor in the settings window, or null for the library's own.
+	/// </summary>
+	/// <remarks>
+	/// It lives beside the identity rather than in it for the same reason <see cref="Controllable"/> does:
+	/// two identifiers for one sensor have to keep comparing equal whether or not the user has chosen a
+	/// display unit, or a dictionary keyed by identity would split when the unit changed. The value is
+	/// stored with the selection, so it survives a restart; a unit that does not suit the sensor's kind is
+	/// ignored by <see cref="SensorFormatting"/> rather than trusted.
+	/// </remarks>
+	public SensorUnit? DisplayUnit { get; init; }
+
+	/// <summary>Compares the four positional members, and deliberately not <see cref="Controllable"/> or <see cref="DisplayUnit"/>.</summary>
 	public bool Equals(SensorIdentifier? other) =>
 		other is not null
 		&& Hardware == other.Hardware

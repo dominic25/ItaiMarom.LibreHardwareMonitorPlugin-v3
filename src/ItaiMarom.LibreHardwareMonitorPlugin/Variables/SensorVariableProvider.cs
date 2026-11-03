@@ -127,12 +127,17 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 			return new ValueTask<VariableReading>(VariableReading.Unavailable);
 		}
 
+		// The cache holds the library's unit; the definition declares the unit the user chose, so the
+		// value has to be converted here or a Fahrenheit widget would show a Celsius number.
+		var converted = SensorFormatting.Value(sensor, value);
+
 		// A bound Slider takes its track from the reading rather than from the definition, so a fan's own
-		// span travels with its value.
+		// span travels with its value. A control reading is always a percentage, so its range needs no
+		// conversion.
 		return new ValueTask<VariableReading>(
 			control is { } range
-				? VariableReading.Of(value, range.Min, range.Max, ControlStep)
-				: VariableReading.Of(value));
+				? VariableReading.Of(converted, range.Min, range.Max, ControlStep)
+				: VariableReading.Of(converted));
 	}
 
 	/// <inheritdoc />

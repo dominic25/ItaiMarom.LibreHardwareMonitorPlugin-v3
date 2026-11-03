@@ -79,6 +79,41 @@ public sealed class MigratedSensorSelectionTests
 	}
 
 	[Test]
+	public async Task The_chosen_display_unit_survives_a_round_trip()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var fahrenheit = GpuCore with { DisplayUnit = SensorUnit.Fahrenheit };
+		MigrationTestData.SeedMigratedSensors(config, fahrenheit);
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.Sensors.Single().DisplayUnit, Is.EqualTo(SensorUnit.Fahrenheit));
+	}
+
+	[Test]
+	public async Task A_stored_unit_that_does_not_suit_the_sensor_is_dropped()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+
+		// CpuTotal is a load, so a size is not a unit it can be shown in. A hand-edited document, or one
+		// written by a version that knew more choices, must not make the plugin convert a percentage as
+		// though it were bytes.
+		var stored = new MigratedSensorSelection([CpuTotal], null)
+			.ToValues()[MigratedSensorSelection.SensorsKey]
+			.GetString()!;
+		var document = JsonNode.Parse(stored)!.AsArray();
+		document[0]!.AsObject()[nameof(MigratedSensor.DisplayUnit)] = "Gigabytes";
+		config.SeedString(entry, MigratedSensorSelection.SensorsKey, document.ToJsonString());
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.Sensors.Single().DisplayUnit, Is.Null);
+	}
+
+	[Test]
 	public async Task The_polling_interval_is_read_back()
 	{
 		using var logger = new LoggerConfiguration().CreateLogger();

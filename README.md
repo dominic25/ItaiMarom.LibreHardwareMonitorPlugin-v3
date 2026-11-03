@@ -52,14 +52,17 @@ without them.
    branch are there for machines that report a few hundred sensors, and a dash means "nothing to report
    right now" - a stopped fan, a drive that is not answering - never a zero.
 3. Set the **polling rate** at the bottom of the window, in milliseconds.
-4. Tick **Start elevated readings at startup** if you want the plugin to ask Windows for administrator
+4. Where a reading can be shown in more than one unit, a selector sits beside it: °C or °F, GB or GiB,
+   MB or MiB, MHz or GHz, and B/s, KB/s or MB/s. The value in the window and the variable share the
+   choice, and leaving the selector alone keeps the default.
+5. Tick **Start elevated readings at startup** if you want the plugin to ask Windows for administrator
    rights at every Macro Deck start, rather than only when you press **Enable elevated readings** in the
    issue list. Leave it clear to be prompted only when you press that button.
-5. To watch another PC as well, expand **Remote machines**, press **Add remote machine**, give it a name
+6. To watch another PC as well, expand **Remote machines**, press **Add remote machine**, give it a name
    and its address, and leave the row in the list. `host:8085` and the full
    `http://host:8085/data.json` address both work. The other PC must be running LibreHardwareMonitor with
    **Remote Web Server** enabled. Its sensors join the tree the next time you open this window.
-6. Press **Save**.
+7. Press **Save**.
 
 What you tick becomes variables as soon as the save reaches Macro Deck. Unticking everything is how the
 "remove all variables" button of the old plugin is reached. Nothing you skip is lost: every sensor on the
@@ -94,7 +97,15 @@ There are two ways a sensor becomes a variable, and both are used the same way a
   from the catalog is just as writable as a ticked one, so it works in the Slider the same way.
 
 A variable carries its unit and how to render it, so a voltage reads as `3.4 V` by itself, a load as
-`13 %`, and a disk's used space as `19.4 GB`. There is nothing to append in the text.
+`13 %`, and a disk's used space as `19.4 GB`. There is nothing to append in the text. The unit is the one
+chosen in the sensor window: temperatures default to °C, sizes to GB and MB, clocks to MHz, and throughput
+to B/s, with Fahrenheit, GiB and MiB, GHz, and KB/s or MB/s available per sensor. The plugin keeps the
+library's own reading internally and converts it for the variable, so changing a unit later changes what
+the widget shows without changing the hardware being read.
+
+Remote readings arrive formatted by the other machine (`12.2 GB`, `53.0 KB/s`). The plugin converts them
+back to its own unit when it caches them, which is what makes the same unit choices work on a remote
+sensor as on a local one.
 
 ### 3. Use them on a button
 

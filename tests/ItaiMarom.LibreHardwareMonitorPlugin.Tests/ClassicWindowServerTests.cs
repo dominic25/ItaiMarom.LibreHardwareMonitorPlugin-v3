@@ -279,6 +279,81 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task A_sensor_that_can_be_shown_in_another_unit_offers_a_selector()
+	{
+		var page = await WindowClient.ReadPageAsync(Open([CpuCore1, CpuTotal], CpuCore1).PageUri);
+
+		// The selector carries its sensor's id in a hidden field, so what the form posts can be joined
+		// back to a sensor without depending on the row order.
+		Assert.That(page, Does.Contain($"name=\"unit_sensor\" value=\"{CpuCore1.ResourceId}\""));
+		Assert.That(page, Does.Contain("name=\"unit_value\" aria-label=\"Unit for CPU Core #1_Temperature\""));
+		Assert.That(page, Does.Contain("<option value=\"Celsius\" selected>"));
+		Assert.That(page, Does.Contain("<option value=\"Fahrenheit\">"));
+
+		// A load is a percentage and has no unit to choose, so its row posts no selector at all.
+		Assert.That(page, Does.Not.Contain($"name=\"unit_sensor\" value=\"{CpuTotal.ResourceId}\""));
+		Assert.That(page, Does.Not.Contain("__"));
+	}
+
+	[Test]
+	public async Task A_unit_selector_opens_on_the_unit_the_sensor_is_configured_to_show()
+	{
+		var units = new Dictionary<string, SensorUnit>(StringComparer.Ordinal)
+		{
+			[CpuCore1.ResourceId] = SensorUnit.Fahrenheit,
+		};
+
+		var page = await WindowClient.ReadPageAsync(OpenWithUnits(units, [CpuCore1], CpuCore1).PageUri);
+
+		// Pressing Save without touching the selector has to keep the unit, so what opens must already be
+		// the stored choice.
+		Assert.That(page, Does.Contain("<option value=\"Fahrenheit\" selected>"));
+		Assert.That(page, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+	}
+
+	[Test]
+	public async Task Saving_the_window_returns_the_unit_each_sensor_was_posted_with()
+	{
+		var opened = Open([CpuCore1, CpuTotal], CpuCore1);
+
+		await WindowClient.SaveAsync(
+			opened.PageUri,
+			[CpuCore1.ResourceId, CpuTotal.ResourceId],
+			1000,
+			units:
+			[
+				(CpuCore1.ResourceId, SensorUnit.Fahrenheit),
+				(CpuTotal.ResourceId, SensorUnit.Gigabytes),
+			]);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.Units, Is.Not.Null);
+		Assert.That(payload.Units![CpuCore1.ResourceId], Is.EqualTo(SensorUnit.Fahrenheit));
+
+		// The window does not know which kind of sensor the id it posted belongs to, so an unfitting unit
+		// travels through; the flow validates it against the sensor it resolved.
+		Assert.That(payload.Units[CpuTotal.ResourceId], Is.EqualTo(SensorUnit.Gigabytes));
+	}
+
+	[Test]
+	public async Task A_posted_unit_this_version_does_not_know_is_dropped()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		await WindowClient.PostAsync(
+			opened.PageUri,
+			[
+				new KeyValuePair<string, string>("sensors", CpuCore1.ResourceId),
+				new KeyValuePair<string, string>("unit_sensor", CpuCore1.ResourceId),
+				new KeyValuePair<string, string>("unit_value", "Knots"),
+				new KeyValuePair<string, string>("save", "1"),
+			]);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.Units, Is.Empty);
+	}
+
+	[Test]
 	public async Task A_selection_is_handed_over_once()
 	{
 		var opened = Open([CpuCore1], CpuCore1);
@@ -502,6 +577,21 @@ public sealed class ClassicWindowServerTests
 			RedirectUri,
 			State,
 			RemoteSources: remotes));
+
+	private ClassicWindowServer.Opened OpenWithUnits(
+		IReadOnlyDictionary<string, SensorUnit> units,
+		IReadOnlyCollection<SensorIdentifier> reported,
+		params SensorIdentifier[] selected) =>
+		_server.Open(new ClassicWindowOpening(
+			"Libre Hardware Monitor",
+			SensorCategory.Build(reported),
+			selected.Select(sensor => sensor.ResourceId).ToArray(),
+			1000,
+			10,
+			10000,
+			RedirectUri,
+			State,
+			DisplayUnits: units));
 
 	/// <summary>The readings the window would be reading, scripted rather than read off a machine.</summary>
 	private sealed class FakeReadings : ISensorReadingSource

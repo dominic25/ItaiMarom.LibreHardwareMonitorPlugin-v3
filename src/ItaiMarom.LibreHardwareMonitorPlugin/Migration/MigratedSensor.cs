@@ -36,7 +36,8 @@ public sealed record MigratedSensor(
 	string? RootHardware,
 	string? RootHardwareName,
 	bool? Controllable = null,
-	string? Source = null)
+	string? Source = null,
+	string? DisplayUnit = null)
 {
 	/// <summary>Flattens a sensor into the stored shape.</summary>
 	public static MigratedSensor From(SensorIdentifier sensor)
@@ -53,7 +54,8 @@ public sealed record MigratedSensor(
 			sensor.Hardware.RootId,
 			sensor.Hardware.RootName,
 			sensor.Controllable,
-			sensor.Hardware.Source);
+			sensor.Hardware.Source,
+			sensor.DisplayUnit?.ToString());
 	}
 
 	/// <summary>
@@ -80,6 +82,15 @@ public sealed record MigratedSensor(
 		// name is what the sensor is filed under when it is.
 		var path = string.IsNullOrWhiteSpace(HardwarePath) ? HardwareName : HardwarePath;
 
+		// A unit that does not suit the sensor's kind - a hand-edited document, or one written by a later
+		// version that knew more choices - is dropped rather than carried into a conversion that would
+		// turn a temperature into a size.
+		SensorUnit? displayUnit = null;
+		if (SensorUnits.TryParse(DisplayUnit, out var storedUnit) && SensorUnits.IsValidFor(kind, storedUnit))
+		{
+			displayUnit = storedUnit;
+		}
+
 		sensor = new SensorIdentifier(
 			new HardwareLocation(
 				Hardware,
@@ -93,6 +104,7 @@ public sealed record MigratedSensor(
 			kind)
 		{
 			Controllable = Controllable ?? false,
+			DisplayUnit = displayUnit,
 		};
 
 		return true;
