@@ -49,6 +49,13 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     SensorFormatting.cs                how a reading is presented (decimals, unit, semantic kind)
     HardwareSensor.cs                  one sample from a source
     ControlRange.cs                    the span a sensor's software control accepts
+    AggregateHardwareSource.cs         the local machine plus every configured remote one
+    IRemoteSourceController.cs         the seam that replaces the remote list at run time
+    RemoteHardwareSource.cs            one remote machine's /data.json, with failure backoff
+    RemoteSensorParser.cs              the tree the Remote Web Server publishes
+    RemoteSourceAddress.cs             what the user typed, reduced to the data.json address
+    RemoteSourceDefinition.cs          a remote machine's label, key and sensor identity
+    RemoteSourceSelection.cs           the remote list the integration and the window share
   Actions/
     ControlAction.cs                   what the fan actions share: sensor picker, options, executor
     SetFanSpeedAction.cs               set a controllable fan or pump to a percentage
@@ -98,6 +105,41 @@ a SMART query, so it is never touched from anything that serves the Macro Deck s
   reads a widget's variable at the configured rate instead of falling back to its own five-second default.
   The host polls its variables on a 250 ms tick, so that is the finest update a widget can see even when
   the loop itself runs faster; the value is still whatever the last poll cached.
+
+## How remote machines work
+
+A remote source is another machine's LibreHardwareMonitor **Remote Web Server**, read at
+`/data.json`. `AggregateHardwareSource` gives the polling loop one source that is this machine's hardware
+plus every configured remote one:
+
+- **Local hardware stays authoritative.** The aggregate wraps the local or elevated source rather than
+  replacing it and forwards `IHardwareElevation` and `IAccessNoteSource` to it. Controls are enumerated
+  and written on this machine only; a remote server publishes readings, not a control surface, so a fan
+  on another PC is read-only by design.
+- **A remote failure is isolated.** A remote that throws or times out is logged and skipped, and the local
+  readings and every other remote still come back. A remote also backs off on failure - one second, two,
+  four, up to a minute - because the polling seam is synchronous and a dead address must not delay every
+  local poll behind its timeout. A successful read resets the backoff.
+- **The address is forgiving.** `host:8085`, `http://host:8085`, and the full
+  `http://host:8085/data.json` all normalize to the last form. Only `http` and `https` are accepted.
+- **Identity is namespaced by a key.** A remote's hardware and sensor ids carry `/remote/<key>/` in front,
+  and `HardwareLocation.Source` holds the key. The key is derived from the label only when it is first
+  created; the window round-trips it in a hidden field, so renaming a machine does not move a variable
+  already bound to one of its sensors. The label is display only: it qualifies a remote root hardware
+  name (`Living Room · AMD Ryzen 7 5800X`) and nothing that has to remain stable.
+- **Local variable names are unchanged.** Remote variable names put the sanitized key in front of the
+  legacy name (`living_room_cpu_total_load`), which is what keeps two machines with a `CPU Total` apart.
+- **Idle remotes cost nothing.** The poll hands each source the watched root-hardware names. A remote whose
+  label is not among them is skipped before any network call.
+- **The list is live.** Remote definitions are stored under `remote_sources` in the same configuration
+  entry as the sensors. `InitializeAsync` applies them through `IRemoteSourceController` before the loop
+  starts, so a saved change takes effect without a restart. The window's sensor tree is built when it
+  opens, so a machine added in one session becomes selectable the next time the window is opened.
+
+The parser walks the document rather than assuming a depth: the root and machine nodes are grouping nodes,
+hardware nodes carry `HardwareId`, sensors carry `SensorId` and `Type`, and the synthetic `/` id is not a
+device. `RawValue` is preferred over the formatted `Value`; `NaN` and infinities become "no reading".
+Responses are decompressed by the HTTP handler when the server sends gzip.
 
 ## How the variables are exposed
 
@@ -397,6 +439,9 @@ Step-by-step port from the Macro Deck 2 plugin:
       the hardware library's driver loads.
 - [x] Elevated hardware helper - the plugin starts unelevated and starts the same binary as an
       administrator on demand, so Macro Deck itself does not have to run elevated.
+- [x] Macro Deck SDK 3.0.0 - the stable SDK packages are pinned in `Directory.Packages.props`.
+- [x] Remote machines - the local hardware plus any number of LibreHardwareMonitor Remote Web Servers,
+      read-only, edited in the same sensor window and stored with the sensor selection.
 
 ## Maybe
 

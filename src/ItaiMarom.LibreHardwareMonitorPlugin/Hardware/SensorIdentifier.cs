@@ -91,7 +91,12 @@ public sealed record SensorIdentifier(
 	/// names the host would reject - chiefly the ones the old plugin produced starting with a digit, such
 	/// as <c>3vsb_voltage</c>.
 	/// </summary>
-	public string VariableName
+	public string VariableName => Qualify(UnqualifiedVariableName);
+
+	/// <summary>
+	/// The name as it would be on this machine, before a remote source's key is put in front of it.
+	/// </summary>
+	private string UnqualifiedVariableName
 	{
 		get
 		{
@@ -115,6 +120,34 @@ public sealed record SensorIdentifier(
 	}
 
 	/// <summary>
+	/// Puts the remote source's key in front of a name. Local sensors keep the exact Macro Deck 2
+	/// spelling; a remote one has to say which machine it is on, and the key - not the label - is what
+	/// makes that stable when the user renames the source.
+	/// </summary>
+	private string Qualify(string name)
+	{
+		if (string.IsNullOrEmpty(Hardware.Source))
+		{
+			return name;
+		}
+
+		var source = VariableNaming.Sanitize(Hardware.Source);
+		if (source.Length == 0)
+		{
+			source = "remote";
+		}
+
+		var qualified = VariableNaming.Sanitize($"{source} {name}");
+		if (VariableNaming.IsValid(qualified))
+		{
+			return qualified;
+		}
+
+		var fallback = VariableNaming.Sanitize($"{source} sensor");
+		return VariableNaming.IsValid(fallback) ? fallback : "remote_sensor";
+	}
+
+	/// <summary>
 	/// Whether a user's search text names this sensor: its own name, what Macro Deck calls it, its kind,
 	/// or the device and tree path it lives on. An absent search matches everything.
 	/// </summary>
@@ -135,7 +168,9 @@ public sealed record SensorIdentifier(
 			|| VariableName.Contains(search, StringComparison.OrdinalIgnoreCase)
 			|| SensorType.ToString().Contains(search, StringComparison.OrdinalIgnoreCase)
 			|| Hardware.RootName.Contains(search, StringComparison.OrdinalIgnoreCase)
-			|| Hardware.Path.Contains(search, StringComparison.OrdinalIgnoreCase);
+			|| Hardware.Path.Contains(search, StringComparison.OrdinalIgnoreCase)
+			|| (Hardware.Source is { } source
+				&& source.Contains(search, StringComparison.OrdinalIgnoreCase));
 	}
 
 	/// <summary>

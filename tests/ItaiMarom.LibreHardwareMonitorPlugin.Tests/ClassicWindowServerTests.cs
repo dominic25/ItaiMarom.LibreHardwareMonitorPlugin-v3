@@ -211,6 +211,74 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task The_window_opens_its_remote_editor_on_the_configured_machines()
+	{
+		var remote = new RemoteSourceDefinition(
+			"Living Room",
+			"http://living-room-pc:8085/data.json",
+			"living_room");
+
+		var page = await WindowClient.ReadPageAsync(
+			OpenWithRemotes([remote], [CpuCore1], CpuCore1).PageUri);
+
+		Assert.That(page, Does.Contain("id=\"remotes\" open>"));
+		Assert.That(page, Does.Contain("name=\"remote_name\""));
+		Assert.That(page, Does.Contain("value=\"Living Room\""));
+		Assert.That(page, Does.Contain("value=\"http://living-room-pc:8085/data.json\""));
+		Assert.That(page, Does.Contain("name=\"remote_key\" value=\"living_room\""));
+		Assert.That(page, Does.Contain("class=\"remove\""));
+		Assert.That(page, Does.Not.Contain("__"));
+	}
+
+	[Test]
+	public async Task The_remote_editor_is_closed_when_there_are_no_remote_machines()
+	{
+		var page = await WindowClient.ReadPageAsync(Open([CpuCore1], CpuCore1).PageUri);
+
+		Assert.That(page, Does.Contain("id=\"remotes\">"));
+		Assert.That(page, Does.Not.Contain("id=\"remotes\" open>"));
+		Assert.That(page, Does.Not.Contain("name=\"remote_name\" value=\""));
+	}
+
+	[Test]
+	public async Task Saving_the_window_returns_the_remote_machines_and_their_keys()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		await WindowClient.SaveAsync(
+			opened.PageUri,
+			[CpuCore1.ResourceId],
+			1000,
+			remotes:
+			[
+				("Living Room", "http://living-room-pc:8085/data.json", "living_room"),
+				("Office PC", "office-pc:8085", "office_pc"),
+			]);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.Remotes, Is.EqualTo(new[]
+		{
+			new ClassicWindowRemote("Living Room", "http://living-room-pc:8085/data.json", "living_room"),
+			new ClassicWindowRemote("Office PC", "office-pc:8085", "office_pc"),
+		}));
+	}
+
+	[Test]
+	public async Task A_blank_remote_row_is_not_a_remote_machine()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		await WindowClient.SaveAsync(
+			opened.PageUri,
+			[CpuCore1.ResourceId],
+			1000,
+			remotes: [("", "", ""), ("Living Room", "living-room-pc:8085", "")]);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.Remotes, Has.Count.EqualTo(1));
+	}
+
+	[Test]
 	public async Task A_selection_is_handed_over_once()
 	{
 		var opened = Open([CpuCore1], CpuCore1);
@@ -419,6 +487,21 @@ public sealed class ClassicWindowServerTests
 			notice,
 			values,
 			autoElevate));
+
+	private ClassicWindowServer.Opened OpenWithRemotes(
+		IReadOnlyList<RemoteSourceDefinition> remotes,
+		IReadOnlyCollection<SensorIdentifier> reported,
+		params SensorIdentifier[] selected) =>
+		_server.Open(new ClassicWindowOpening(
+			"Libre Hardware Monitor",
+			SensorCategory.Build(reported),
+			selected.Select(sensor => sensor.ResourceId).ToArray(),
+			1000,
+			10,
+			10000,
+			RedirectUri,
+			State,
+			RemoteSources: remotes));
 
 	/// <summary>The readings the window would be reading, scripted rather than read off a machine.</summary>
 	private sealed class FakeReadings : ISensorReadingSource

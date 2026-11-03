@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using Serilog;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
@@ -21,6 +22,10 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 /// Whether the window opens with its <em>Start elevated readings at startup</em> box ticked, which is
 /// the preference the plugin is running with.
 /// </param>
+/// <param name="RemoteSources">
+/// The remote machines the window opens its editor on. They are read from and written to the same form
+/// as the sensors, so one save carries the whole configuration.
+/// </param>
 internal sealed record ClassicWindowOpening(
 	string Title,
 	IReadOnlyList<SensorCategory> Categories,
@@ -32,13 +37,18 @@ internal sealed record ClassicWindowOpening(
 	string State,
 	string? Notice = null,
 	IReadOnlyDictionary<string, string?>? Values = null,
-	bool AutoElevate = false);
+	bool AutoElevate = false,
+	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null);
+
+/// <summary>One remote machine as the window's form carried it back, before it is validated.</summary>
+internal sealed record ClassicWindowRemote(string? Name, string? Url, string? Key);
 
 /// <summary>What the classic sensor window sent back when the user pressed Save.</summary>
 internal sealed record ClassicWindowPayload(
 	IReadOnlyList<string> ResourceIds,
 	double? PollingMilliseconds,
-	bool AutoElevate);
+	bool AutoElevate,
+	IReadOnlyList<ClassicWindowRemote>? Remotes = null);
 
 /// <summary>
 /// A loopback-only web server with one job: serve the Macro Deck 2 dialog rebuilt as a page, and collect
@@ -440,7 +450,8 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			ReadPolling(form),
 
 			// A checkbox is submitted only while it is ticked, so its presence is the whole answer.
-			form.ContainsKey("auto_elevate"));
+			form.ContainsKey("auto_elevate"),
+			ReadRemotes(form));
 
 		_logger.Information(
 			"The classic sensor window saved {SensorCount} sensors.",
@@ -485,6 +496,40 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 		return milliseconds;
 	}
+
+	/// <summary>
+	/// The remote rows, three parallel lists in the form joined back into rows. A row with no address is
+	/// the empty line the editor starts a new remote in, so it is dropped rather than treated as a
+	/// configuration error the user has to clear.
+	/// </summary>
+	private static List<ClassicWindowRemote> ReadRemotes(Dictionary<string, List<string>> form)
+	{
+		var names = ValuesOf(form, "remote_name");
+		var urls = ValuesOf(form, "remote_url");
+		var keys = ValuesOf(form, "remote_key");
+
+		var count = Math.Max(names.Count, Math.Max(urls.Count, keys.Count));
+		var remotes = new List<ClassicWindowRemote>(count);
+
+		for (var index = 0; index < count; index++)
+		{
+			var url = At(urls, index);
+			if (string.IsNullOrWhiteSpace(url))
+			{
+				continue;
+			}
+
+			remotes.Add(new ClassicWindowRemote(At(names, index), url, At(keys, index)));
+		}
+
+		return remotes;
+	}
+
+	private static List<string> ValuesOf(Dictionary<string, List<string>> form, string name) =>
+		form.TryGetValue(name, out var values) ? values : [];
+
+	private static string? At(List<string> values, int index) =>
+		index < values.Count ? values[index] : null;
 
 	private bool TryGetSession(string key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Session? session)
 	{

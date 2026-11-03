@@ -43,6 +43,9 @@ internal static class ClassicWindowPage
 	private const string PollingMinimumMarker = "__POLLING_MIN__";
 	private const string PollingMaximumMarker = "__POLLING_MAX__";
 	private const string AutoElevateMarker = "__AUTO_ELEVATE__";
+	private const string RemotesMarker = "__REMOTES__";
+	private const string RemoteTemplateMarker = "__REMOTE_TEMPLATE__";
+	private const string RemotesOpenMarker = "__REMOTES_OPEN__";
 
 	/// <summary>What a window with no readings to show has: every cell renders as "no reading".</summary>
 	private static readonly IReadOnlyDictionary<string, string?> EmptyValues =
@@ -102,6 +105,29 @@ internal static class ClassicWindowPage
 		}
 		#filter:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 		#counts, #updated { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+		.remotes {
+			margin: 10px 22px 0; border: 1px solid var(--line); border-radius: 8px;
+			background: var(--panel);
+		}
+		.remotes > summary { padding: 9px 12px; font-weight: 600; }
+		.remotes > summary .count { color: var(--dim); font-weight: 400; margin-left: auto; }
+		.remote-body { padding: 2px 12px 12px; }
+		.remote-body .hint { margin: 0 0 10px; color: var(--dim); max-width: 92ch; }
+		.remote-body code {
+			padding: 1px 5px; border-radius: 4px; background: var(--bg);
+			font: 12px/1.4 Consolas, monospace;
+		}
+		.remote-row {
+			display: grid; grid-template-columns: minmax(140px, 1fr) minmax(220px, 2fr) auto;
+			gap: 8px; margin-bottom: 8px;
+		}
+		.remote-row input {
+			padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+			background: var(--bg); color: var(--text); font: inherit; min-width: 0;
+		}
+		.remote-row input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+		.remote-row button.remove { padding: 7px 12px; }
+		#addRemote { margin-top: 2px; }
 		.tree { flex: 1; overflow: auto; padding: 10px 12px 18px; }
 		details { border-radius: 6px; }
 		summary {
@@ -170,6 +196,16 @@ internal static class ClassicWindowPage
 				<span id="updated"></span>
 				<span id="counts"></span>
 			</div>
+
+			<details class="remotes" id="remotes"__REMOTES_OPEN__>
+				<summary><span>Remote machines</span><span class="count" id="remoteCount"></span></summary>
+				<div class="remote-body">
+					<p class="hint">Read sensors from another PC that runs LibreHardwareMonitor with its <strong>Remote Web Server</strong> enabled. Enter <code>host:8085</code> or the full <code>http://host:8085/data.json</code> address. Remote sensors are read-only. A machine added here appears in the tree the next time this window is opened.</p>
+					<div id="remoteRows">__REMOTES__</div>
+					<button type="button" id="addRemote">Add remote machine</button>
+					<template id="remoteTemplate">__REMOTE_TEMPLATE__</template>
+				</div>
+			</details>
 
 			<div class="tree">
 		__TREE__
@@ -279,6 +315,38 @@ internal static class ClassicWindowPage
 
 			syncAll();
 
+			// Remote machines are rows of three fields each, so what the form posts is three parallel
+			// lists. A row added here starts as a blank line; the plugin drops one it cannot turn into an
+			// address, and the tree it would add to is only rebuilt the next time the window opens.
+			var remotes = document.getElementById("remotes");
+			var remoteRows = document.getElementById("remoteRows");
+			var remoteTemplate = document.getElementById("remoteTemplate");
+			var remoteCount = document.getElementById("remoteCount");
+
+			function syncRemotes() {
+				var rows = remoteRows.querySelectorAll(".remote-row").length;
+				if (remoteCount) remoteCount.textContent = rows === 0 ? "none configured" : rows + " configured";
+			}
+
+			remoteRows.addEventListener("click", function (event) {
+				var button = event.target.closest("button.remove");
+				if (!button) return;
+				button.closest(".remote-row").remove();
+				syncRemotes();
+			});
+
+			document.getElementById("addRemote").addEventListener("click", function () {
+				if (!remoteTemplate || !remoteTemplate.content) return;
+				var row = remoteTemplate.content.firstElementChild.cloneNode(true);
+				remoteRows.appendChild(row);
+				remotes.open = true;
+				syncRemotes();
+				var url = row.querySelector('input[name="remote_url"]');
+				if (url) url.focus();
+			});
+
+			syncRemotes();
+
 			// The readings are asked for once a second and written into the cell of the sensor they belong
 			// to. Only those cells are touched, so nothing the user has ticked, opened or typed moves under
 			// them, and a cell is never matched by position: it carries the sensor's resource id.
@@ -338,7 +406,46 @@ internal static class ClassicWindowPage
 			.Replace(PollingMinimumMarker, Milliseconds(opening.MinimumPollingMilliseconds), StringComparison.Ordinal)
 			.Replace(PollingMaximumMarker, Milliseconds(opening.MaximumPollingMilliseconds), StringComparison.Ordinal)
 			.Replace(PollingMarker, Milliseconds(opening.PollingMilliseconds), StringComparison.Ordinal)
-			.Replace(AutoElevateMarker, opening.AutoElevate ? " checked" : string.Empty, StringComparison.Ordinal);
+			.Replace(AutoElevateMarker, opening.AutoElevate ? " checked" : string.Empty, StringComparison.Ordinal)
+			.Replace(RemotesOpenMarker, opening.RemoteSources is { Count: > 0 } ? " open" : string.Empty, StringComparison.Ordinal)
+			.Replace(RemotesMarker, RenderRemotes(opening), StringComparison.Ordinal)
+			.Replace(RemoteTemplateMarker, RenderRemoteRow(null), StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// The remote machines the window is configured with, one row each. The key travels in a hidden
+	/// field: it is what variable names and sensor identities were built from, and a rename must not
+	/// move either.
+	/// </summary>
+	private static string RenderRemotes(ClassicWindowOpening opening)
+	{
+		var remotes = opening.RemoteSources;
+		if (remotes is not { Count: > 0 })
+		{
+			return string.Empty;
+		}
+
+		var builder = new StringBuilder();
+		foreach (var remote in remotes)
+		{
+			builder.Append(RenderRemoteRow(remote));
+		}
+
+		return builder.ToString();
+	}
+
+	/// <summary>One row of the remote editor, and the blank row the page clones when one is added.</summary>
+	private static string RenderRemoteRow(RemoteSourceDefinition? remote)
+	{
+		return new StringBuilder()
+			.Append("<div class=\"remote-row\"><input type=\"text\" name=\"remote_name\" placeholder=\"Name (optional)\" aria-label=\"Remote machine name\" value=\"")
+			.Append(WebUtility.HtmlEncode(remote?.Name ?? string.Empty))
+			.Append("\"><input type=\"text\" name=\"remote_url\" placeholder=\"host:8085 or http://host:8085/data.json\" aria-label=\"Remote machine address\" value=\"")
+			.Append(WebUtility.HtmlEncode(remote?.Url ?? string.Empty))
+			.Append("\"><input type=\"hidden\" name=\"remote_key\" value=\"")
+			.Append(WebUtility.HtmlEncode(remote?.Key ?? string.Empty))
+			.Append("\"><button type=\"button\" class=\"remove\" title=\"Remove this remote machine\">Remove</button></div>\n")
+			.ToString();
 	}
 
 	/// <summary>

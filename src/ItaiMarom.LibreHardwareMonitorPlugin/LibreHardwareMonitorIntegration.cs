@@ -62,6 +62,8 @@ public sealed class LibreHardwareMonitorIntegration :
 	private readonly SensorVariableProvider _variables;
 	private readonly MissingReadingsIssueProvider _issues;
 	private readonly IHardwareElevation? _elevation;
+	private readonly IRemoteSourceController? _remoteSources;
+	private readonly RemoteSourceSelection _remoteSelection;
 	private readonly IPluginCatalogNotifier _catalogNotifier;
 	private readonly ClassicWindowServer _window;
 	private readonly ILogger _logger;
@@ -96,7 +98,8 @@ public sealed class LibreHardwareMonitorIntegration :
 		IHardwareSensorSource source,
 		SensorSelection selection,
 		IAccessDiagnosis diagnosis,
-		IPluginCatalogNotifier catalogNotifier)
+		IPluginCatalogNotifier catalogNotifier,
+		RemoteSourceSelection? remoteSelection = null)
 	{
 		_logger = logger ?? throw new ArgumentNullException(nameof(logger));
 		_catalogNotifier = catalogNotifier ?? throw new ArgumentNullException(nameof(catalogNotifier));
@@ -105,6 +108,11 @@ public sealed class LibreHardwareMonitorIntegration :
 		// also the one place the issue asks. A source that is not elevatable - the test fake, say -
 		// simply has no button beyond the sensor window.
 		_elevation = source as IHardwareElevation;
+
+		// The aggregate source is also the place a remote list can be changed at run time. A fake source
+		// in a test does not have one, and then a saved remote list simply has nothing to reach.
+		_remoteSources = source as IRemoteSourceController;
+		_remoteSelection = remoteSelection ?? new RemoteSourceSelection();
 
 		// The diagnosis has to see the source: once a helper is serving the hardware, this process
 		// cannot answer whether the driver is reachable, and the helper's own answer is the one that
@@ -140,7 +148,13 @@ public sealed class LibreHardwareMonitorIntegration :
 	/// what is configured now rather than on what was configured when the plugin started.
 	/// </summary>
 	public IConfigFlow CreateConfigFlow() =>
-		new LibreHardwareMonitorConfigFlow(_hardware, _selection, _window, _logger, _autoElevate);
+		new LibreHardwareMonitorConfigFlow(
+			_hardware,
+			_selection,
+			_window,
+			_logger,
+			_autoElevate,
+			_remoteSelection);
 
 	/// <inheritdoc />
 	public IReadOnlyList<IActionDefinition> Actions { get; }
@@ -280,9 +294,16 @@ public sealed class LibreHardwareMonitorIntegration :
 			.ReadAsync(context.Config, _logger, CancellationToken.None)
 			.ConfigureAwait(false);
 
+		var remotes = migrated.RemoteSources ?? [];
 		_selection.Replace(migrated.Sensors);
+		_remoteSelection.Replace(remotes);
 		_hardware.SetOptions(PollingOptions(migrated.PollingInterval));
 		_autoElevate = migrated.AutoElevate == true;
+
+		// The aggregate source is the only reader that can reach a remote machine, and a saved remote list
+		// has to be in place before the first poll: waiting for the next start would leave a new remote's
+		// sensors missing until the user restarted Macro Deck.
+		_remoteSources?.ReplaceRemoteSources(remotes);
 
 		// The eager variables are the ones the host reads directly, without ever subscribing, so they are
 		// the working set until a binding narrows or widens it.

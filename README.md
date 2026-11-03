@@ -37,6 +37,9 @@ without them.
   button. Leave it clear to be prompted only when you press that button.
 - **A sensor window instead of a form** - the Macro Deck 2 dialog, carried over whole and served to your
   browser, with a live reading beside every sensor.
+- **Other machines on the same deck** - add a PC running LibreHardwareMonitor's Remote Web Server and its
+  hardware appears in the same tree and catalog. Local sensors keep their names; remote ones are prefixed
+  with the machine's key, and are read-only.
 
 ## Getting started
 
@@ -52,11 +55,21 @@ without them.
 4. Tick **Start elevated readings at startup** if you want the plugin to ask Windows for administrator
    rights at every Macro Deck start, rather than only when you press **Enable elevated readings** in the
    issue list. Leave it clear to be prompted only when you press that button.
-5. Press **Save**.
+5. To watch another PC as well, expand **Remote machines**, press **Add remote machine**, give it a name
+   and its address, and leave the row in the list. `host:8085` and the full
+   `http://host:8085/data.json` address both work. The other PC must be running LibreHardwareMonitor with
+   **Remote Web Server** enabled. Its sensors join the tree the next time you open this window.
+6. Press **Save**.
 
 What you tick becomes variables as soon as the save reaches Macro Deck. Unticking everything is how the
 "remove all variables" button of the old plugin is reached. Nothing you skip is lost: every sensor on the
 machine stays reachable from the variable catalog.
+
+Remote sensors are read-only: a fan on another machine is not a fan this plugin can drive. A remote
+machine is identified by a key derived from its name, and that key is kept when you rename it, so the
+variables already bound to its sensors do not move. Remote variables carry the key in front of the local
+name - `{{ vars.living_room_cpu_total_load }}`, for example - so two machines can publish a sensor with
+the same name.
 
 Three badges explain what a sensor can be used for:
 
@@ -139,6 +152,8 @@ its limited mode. The prompt appears on the PC running Macro Deck, not on the de
   drive health and fan control. The plugin starts its own elevated helper from the issue list, or at
   startup if you asked it to, so Macro Deck itself does not have to run elevated. See
   [Administrator rights and PawnIO are optional](#administrator-rights-and-pawnio-are-optional).
+- Optional: on every machine you want to watch remotely, LibreHardwareMonitor running with its
+  **Remote Web Server** enabled. Remote readings are read-only.
 
 ## Development
 

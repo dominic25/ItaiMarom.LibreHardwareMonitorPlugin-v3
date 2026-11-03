@@ -39,15 +39,19 @@ var plugin = MacroDeckPlugin.CreatePlugin(args)
         // demand. The local source is constructed here rather than registered separately so the
         // elevated wrapper is the one owner that closes it, whichever mode the plugin ends up in.
         services.AddSingleton<IHardwareHostLauncher, WindowsHardwareHostLauncher>();
-        services.AddSingleton<IHardwareSensorSource>(provider => new ElevatedHardwareSource(
-            new LibreHardwareMonitorSource(),
-            provider.GetRequiredService<IHardwareHostLauncher>(),
+        services.AddSingleton<IHardwareSensorSource>(provider => new AggregateHardwareSource(
+            new ElevatedHardwareSource(
+                new LibreHardwareMonitorSource(),
+                provider.GetRequiredService<IHardwareHostLauncher>(),
+                provider.GetRequiredService<ILogger>()),
             provider.GetRequiredService<ILogger>()));
 
-        // One selection shared by the integration that fills it and the provider that reads it. The
-        // diagnosis sees the source so an elevated helper's answer wins over this process's own: this
-        // process cannot open the driver, but the helper can.
+        // One selection shared by the integration that fills it and the provider that reads it, and the
+        // same shape for the remote list the settings window edits. The diagnosis sees the source so an
+        // elevated helper's answer wins over this process's own: this process cannot open the driver, but
+        // the helper can.
         services.AddSingleton<SensorSelection>();
+        services.AddSingleton<RemoteSourceSelection>();
         services.AddSingleton<IAccessDiagnosis>(provider =>
             new KernelAccessDiagnosis(provider.GetRequiredService<IHardwareSensorSource>()));
     })

@@ -35,7 +35,8 @@ public sealed record MigratedSensor(
 	string? HardwarePath,
 	string? RootHardware,
 	string? RootHardwareName,
-	bool? Controllable = null)
+	bool? Controllable = null,
+	string? Source = null)
 {
 	/// <summary>Flattens a sensor into the stored shape.</summary>
 	public static MigratedSensor From(SensorIdentifier sensor)
@@ -51,7 +52,8 @@ public sealed record MigratedSensor(
 			sensor.Hardware.Path,
 			sensor.Hardware.RootId,
 			sensor.Hardware.RootName,
-			sensor.Controllable);
+			sensor.Controllable,
+			sensor.Hardware.Source);
 	}
 
 	/// <summary>
@@ -79,7 +81,13 @@ public sealed record MigratedSensor(
 		var path = string.IsNullOrWhiteSpace(HardwarePath) ? HardwareName : HardwarePath;
 
 		sensor = new SensorIdentifier(
-			new HardwareLocation(Hardware, HardwareName, path, RootHardware, RootHardwareName),
+			new HardwareLocation(
+				Hardware,
+				HardwareName,
+				path,
+				RootHardware,
+				RootHardwareName,
+				string.IsNullOrWhiteSpace(Source) ? null : Source),
 			Sensor,
 			SensorName,
 			kind)

@@ -280,6 +280,132 @@ public sealed class ConfigFlowProtocolTests
 	}
 
 	[Test]
+	public async Task Saving_the_window_stores_the_remote_machines()
+	{
+		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var result = await SaveWindowAsync(
+			harness,
+			Session,
+			[cpu.ResourceId],
+			1000,
+			remotes: [("Living Room", "living-room-pc:8085", "")]);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.RemoteSources, Has.Count.EqualTo(1));
+		Assert.That(restored.RemoteSources![0].Name, Is.EqualTo("Living Room"));
+		Assert.That(restored.RemoteSources[0].Url, Is.EqualTo("http://living-room-pc:8085/data.json"));
+		Assert.That(restored.RemoteSources[0].Key, Is.EqualTo("living_room"));
+	}
+
+	[Test]
+	public async Task The_window_reopens_on_the_stored_remote_machines()
+	{
+		var source = new FakeHardwareSensorSource().Add("CPU", "CPU Total", SensorType.Load, 42f);
+		var cpu = source.Sensors[0];
+		var remote = new RemoteSourceDefinition(
+			"Living Room",
+			"http://living-room-pc:8085/data.json",
+			"living_room");
+
+		await using var harness = CreateHarness(source);
+		var entry = MigrationTestData.SeedMigratedSensors(harness.Context.Config, cpu);
+		MigrationTestData.SeedRemoteSources(harness.Context.Config, entry, remote);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var page = await WindowClient.ReadPageAsync(await ContinueAsync(harness, Session));
+
+		Assert.That(page, Does.Contain("id=\"remotes\" open>"));
+		Assert.That(page, Does.Contain("name=\"remote_name\""));
+		Assert.That(page, Does.Contain("value=\"Living Room\""));
+		Assert.That(page, Does.Contain("name=\"remote_key\" value=\"living_room\""));
+	}
+
+	[Test]
+	public async Task Renaming_a_remote_machine_keeps_the_key_its_variables_use()
+	{
+		var remote = new RemoteSourceDefinition(
+			"Living Room",
+			"http://living-room-pc:8085/data.json",
+			"living_room");
+
+		await using var harness = CreateHarness(new FakeHardwareSensorSource());
+		var entry = MigrationTestData.SeedMigratedSensors(harness.Context.Config);
+		MigrationTestData.SeedRemoteSources(harness.Context.Config, entry, remote);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var result = await SaveWindowAsync(
+			harness,
+			Session,
+			[],
+			1000,
+			remotes: [("The Living Room", "http://living-room-pc:8085/data.json", "living_room")]);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.RemoteSources![0].Name, Is.EqualTo("The Living Room"));
+		Assert.That(restored.RemoteSources[0].Key, Is.EqualTo("living_room"));
+	}
+
+	[Test]
+	public async Task A_remote_row_that_is_not_an_address_or_names_the_same_machine_is_dropped()
+	{
+		await using var harness = CreateHarness(new FakeHardwareSensorSource());
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var result = await SaveWindowAsync(
+			harness,
+			Session,
+			[],
+			1000,
+			remotes:
+			[
+				("Bad", "file:///C:/sensors.json", ""),
+				("Living Room", "living-room-pc:8085", ""),
+				("Duplicate", "http://living-room-pc:8085/data.json", ""),
+			]);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.RemoteSources, Has.Count.EqualTo(1));
+		Assert.That(restored.RemoteSources![0].Name, Is.EqualTo("Living Room"));
+	}
+
+	[Test]
+	public async Task Removing_the_last_remote_machine_stores_an_empty_list()
+	{
+		var remote = new RemoteSourceDefinition(
+			"Living Room",
+			"http://living-room-pc:8085/data.json",
+			"living_room");
+
+		await using var harness = CreateHarness(new FakeHardwareSensorSource());
+		var entry = MigrationTestData.SeedMigratedSensors(harness.Context.Config);
+		MigrationTestData.SeedRemoteSources(harness.Context.Config, entry, remote);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var result = await SaveWindowAsync(harness, Session, [], 1000);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.RemoteSources, Is.Empty);
+	}
+
+	[Test]
 	public async Task A_window_that_was_never_saved_stores_nothing()
 	{
 		await using var harness = CreateHarness(new FakeHardwareSensorSource());
@@ -387,10 +513,11 @@ public sealed class ConfigFlowProtocolTests
 		string sessionId,
 		IReadOnlyCollection<string> ticked,
 		double? polling = null,
-		bool autoElevate = false)
+		bool autoElevate = false,
+		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null)
 	{
 		var window = await ContinueAsync(harness, sessionId);
-		var callback = await WindowClient.SaveAsync(window, ticked, polling, autoElevate);
+		var callback = await WindowClient.SaveAsync(window, ticked, polling, autoElevate, remotes);
 
 		return await ResumeAsync(harness, sessionId, callback);
 	}

@@ -37,7 +37,8 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 public sealed record MigratedSensorSelection(
 	IReadOnlyList<SensorIdentifier> Sensors,
 	TimeSpan? PollingInterval,
-	bool? AutoElevate = null)
+	bool? AutoElevate = null,
+	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null)
 {
 	/// <summary>The value the sensor list is stored under.</summary>
 	public const string SensorsKey = "sensors";
@@ -50,6 +51,13 @@ public sealed record MigratedSensorSelection(
 	/// means off, which is what a migration and an entry written before the setting existed carry.
 	/// </summary>
 	public const string AutoElevateKey = "auto_elevate";
+
+	/// <summary>
+	/// The value the remote machine list is stored under, as the same kind of JSON string the sensor list
+	/// uses. Absent means this plugin has no remote sources, which is what every document written before
+	/// remote monitoring existed carries.
+	/// </summary>
+	public const string RemoteSourcesKey = "remote_sources";
 
 	/// <summary>Nothing migrated, or nothing that could be read back.</summary>
 	public static MigratedSensorSelection Empty { get; } = new([], null);
@@ -81,6 +89,15 @@ public sealed record MigratedSensorSelection(
 		{
 			values[AutoElevateKey] = JsonSerializer.SerializeToElement(
 				autoElevate ? "true" : "false",
+				SerializerOptions);
+		}
+
+		// A migration leaves this unset, because the old plugin had no remote sources. The settings window
+		// always writes the list, including an empty one, which is how removing the last remote is stored.
+		if (RemoteSources is { } remotes)
+		{
+			values[RemoteSourcesKey] = JsonSerializer.SerializeToElement(
+				JsonSerializer.Serialize(remotes.ToArray(), SerializerOptions),
 				SerializerOptions);
 		}
 
@@ -129,6 +146,9 @@ public sealed record MigratedSensorSelection(
 
 		var sensors = new List<SensorIdentifier>();
 		var seen = new HashSet<SensorIdentifier>();
+		var remoteSources = new List<RemoteSourceDefinition>();
+		var remoteUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var remoteKeys = new HashSet<string>(StringComparer.Ordinal);
 		TimeSpan? pollingInterval = null;
 		bool? autoElevate = null;
 
@@ -153,9 +173,16 @@ public sealed record MigratedSensorSelection(
 			{
 				autoElevate = preference;
 			}
+
+			ReadRemoteSources(
+				await ReadValueAsync(config, entry, RemoteSourcesKey, logger, cancellationToken).ConfigureAwait(false),
+				logger,
+				remoteSources,
+				remoteUrls,
+				remoteKeys);
 		}
 
-		return new MigratedSensorSelection(sensors, pollingInterval, autoElevate);
+		return new MigratedSensorSelection(sensors, pollingInterval, autoElevate, remoteSources);
 	}
 
 	private static async Task<string?> ReadValueAsync(
@@ -228,4 +255,54 @@ public sealed record MigratedSensorSelection(
 
 	private static bool? ReadAutoElevate(string? stored) =>
 		bool.TryParse(stored, out var value) ? value : null;
+
+	/// <summary>
+	/// Reads one stored remote list into the sets the whole configuration shares, so a remote the user
+	/// kept in two entries is one source and two rows that derive the same key stay distinct.
+	/// </summary>
+	private static void ReadRemoteSources(
+		string? stored,
+		ILogger logger,
+		List<RemoteSourceDefinition> remotes,
+		HashSet<string> usedUrls,
+		HashSet<string> usedKeys)
+	{
+		if (stored is null)
+		{
+			return;
+		}
+
+		try
+		{
+			foreach (var record in JsonSerializer.Deserialize<StoredRemoteSource?[]>(stored, SerializerOptions) ?? [])
+			{
+				if (record is null)
+				{
+					continue;
+				}
+
+				if (RemoteSourceDefinition.TryCreate(
+					record.Name,
+					record.Url,
+					record.Key,
+					usedKeys,
+					usedUrls,
+					out var definition))
+				{
+					remotes.Add(definition!);
+				}
+				else
+				{
+					logger.Debug("A stored remote source was dropped because it was not complete or was a duplicate.");
+				}
+			}
+		}
+		catch (JsonException exception)
+		{
+			logger.Warning(exception, "The stored remote source list could not be parsed.");
+		}
+	}
+
+	/// <summary>The shape a remote source was written in. Nullable because it is read from older text.</summary>
+	private sealed record StoredRemoteSource(string? Name, string? Url, string? Key);
 }

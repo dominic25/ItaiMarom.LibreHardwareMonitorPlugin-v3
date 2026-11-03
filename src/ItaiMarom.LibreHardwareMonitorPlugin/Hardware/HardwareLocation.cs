@@ -12,11 +12,26 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 /// </param>
 /// <param name="RootId">The identifier of the top-level hardware this hangs off, itself included.</param>
 /// <param name="RootName">The name of that top-level hardware, for example <c>Motherboard</c>.</param>
-public sealed record HardwareLocation(string Id, string Name, string Path, string RootId, string RootName)
+/// <param name="Source">
+/// The key of the remote source this hardware came from, or null for the machine the plugin runs on.
+/// It is part of identity: the same library identifier on two machines names two different sensors.
+/// </param>
+public sealed record HardwareLocation(
+	string Id,
+	string Name,
+	string Path,
+	string RootId,
+	string RootName,
+	string? Source = null)
 {
 	/// <summary>The location of a top-level piece of hardware.</summary>
-	public static HardwareLocation Root(string id, string name) => new(id, name, name, id, name);
+	public static HardwareLocation Root(string id, string name, string? source = null) =>
+		new(id, name, name, id, name, source);
 
 	/// <summary>A sub-device of this one - a motherboard's super-I/O chip, say.</summary>
-	public HardwareLocation Child(string id, string name) => new(id, name, $"{Path}/{name}", RootId, RootName);
+	public HardwareLocation Child(string id, string name) =>
+		new(id, name, $"{Path}/{name}", RootId, RootName, Source);
+
+	/// <summary>Whether this hardware belongs to another machine.</summary>
+	public bool IsRemote => !string.IsNullOrEmpty(Source);
 }

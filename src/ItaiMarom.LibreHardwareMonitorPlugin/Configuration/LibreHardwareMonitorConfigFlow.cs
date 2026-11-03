@@ -65,6 +65,7 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 	private readonly SensorSelection _selection;
 	private readonly ClassicWindowServer _window;
 	private readonly bool _autoElevate;
+	private readonly RemoteSourceSelection _remotes;
 	private readonly ILogger _logger;
 
 	/// <summary>
@@ -78,13 +79,15 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		SensorSelection selection,
 		ClassicWindowServer window,
 		ILogger logger,
-		bool autoElevate = false)
+		bool autoElevate = false,
+		RemoteSourceSelection? remotes = null)
 	{
 		_hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
 		_window = window ?? throw new ArgumentNullException(nameof(window));
 		_logger = (logger ?? throw new ArgumentNullException(nameof(logger))).ForContext<LibreHardwareMonitorConfigFlow>();
 		_autoElevate = autoElevate;
+		_remotes = remotes ?? new RemoteSourceSelection();
 	}
 
 	/// <inheritdoc />
@@ -144,7 +147,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 				oauth.State,
 				_hardware.AccessNote,
 				values,
-				_autoElevate));
+				_autoElevate,
+				_remotes.Remotes));
 
 			_logger.Information(
 				"The classic sensor window was opened on {SensorCount} sensors at {WindowUri}.",
@@ -188,25 +192,68 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		// running at is kept rather than dropped, which is what would silently reset it to the default.
 		var polling = PollingInterval(payload)
 			?? TimeSpan.FromMilliseconds(CurrentPollingMilliseconds());
+		var remotes = ResolveRemotes(payload.Remotes ?? []);
 
-		_logger.Information("The classic sensor window sent back {SensorCount} sensors.", sensors.Count);
+		_logger.Information(
+			"The classic sensor window sent back {SensorCount} sensors and {RemoteCount} remote sources.",
+			sensors.Count,
+			remotes.Count);
 
-		return Complete(sensors, polling, payload.AutoElevate);
+		return Complete(sensors, polling, payload.AutoElevate, remotes);
 	}
 
 	/// <summary>What the screen ends in: the selection written as a configuration entry.</summary>
 	private ConfigFlowResult Complete(
 		IReadOnlyList<SensorIdentifier> sensors,
 		TimeSpan? polling,
-		bool autoElevate)
+		bool autoElevate,
+		List<RemoteSourceDefinition> remotes)
 	{
-		_logger.Information("The sensor configuration was saved with {SensorCount} sensors.", sensors.Count);
+		_logger.Information(
+			"The sensor configuration was saved with {SensorCount} sensors and {RemoteCount} remote sources.",
+			sensors.Count,
+			remotes.Count);
 
 		// Saving the window is an explicit answer to the startup elevation checkbox, including when the
 		// box is unticked: from here on the plugin has a preference rather than an unset one.
 		return ConfigFlowResult.Complete(
 			EntryTitle,
-			new MigratedSensorSelection(sensors, polling, autoElevate).ToConfigurationValues());
+			new MigratedSensorSelection(sensors, polling, autoElevate, remotes).ToConfigurationValues());
+	}
+
+	/// <summary>
+	/// Turns the rows the window sent into the definitions that are stored. A row the plugin cannot make
+	/// an address out of is dropped rather than saved as a source that would fail on every poll; a
+	/// duplicate is dropped because two rows for one machine are one source, and the key is kept so a
+	/// rename does not move the variables already bound to it.
+	/// </summary>
+	private List<RemoteSourceDefinition> ResolveRemotes(
+		IReadOnlyList<ClassicWindowRemote> rows)
+	{
+		var definitions = new List<RemoteSourceDefinition>(rows.Count);
+		var usedKeys = new HashSet<string>(StringComparer.Ordinal);
+		var usedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		foreach (var row in rows)
+		{
+			if (RemoteSourceDefinition.TryCreate(
+				row.Name,
+				row.Url,
+				row.Key,
+				usedKeys,
+				usedUrls,
+				out var definition))
+			{
+				definitions.Add(definition!);
+			}
+			else if (!string.IsNullOrWhiteSpace(row.Url))
+			{
+				_logger.Warning(
+					"A remote source row was dropped because its address was not valid or named a machine already listed.");
+			}
+		}
+
+		return definitions;
 	}
 
 	/// <summary>

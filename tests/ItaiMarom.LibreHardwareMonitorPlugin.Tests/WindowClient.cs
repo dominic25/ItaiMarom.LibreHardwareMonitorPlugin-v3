@@ -63,7 +63,8 @@ internal static class WindowClient
 		Uri windowUri,
 		IEnumerable<string> resourceIds,
 		double? polling = null,
-		bool autoElevate = false)
+		bool autoElevate = false,
+		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null)
 	{
 		var fields = resourceIds
 			.Select(resourceId => new KeyValuePair<string, string>("sensors", resourceId))
@@ -82,6 +83,14 @@ internal static class WindowClient
 			// A checkbox is submitted only while it is ticked, so this is exactly what a browser sends
 			// for the startup elevation box.
 			fields.Add(new KeyValuePair<string, string>("auto_elevate", "1"));
+		}
+
+		foreach (var (name, url, key) in remotes ?? [])
+		{
+			// The editor posts three parallel lists, in row order, which is what the form does.
+			fields.Add(new KeyValuePair<string, string>("remote_name", name ?? string.Empty));
+			fields.Add(new KeyValuePair<string, string>("remote_url", url ?? string.Empty));
+			fields.Add(new KeyValuePair<string, string>("remote_key", key ?? string.Empty));
 		}
 
 		return await PostAsync(windowUri, fields).ConfigureAwait(false);

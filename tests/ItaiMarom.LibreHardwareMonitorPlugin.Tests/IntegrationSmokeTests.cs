@@ -132,6 +132,41 @@ public sealed class IntegrationSmokeTests
 			a => a.Kind == "variables"));
 	}
 
+	[Test]
+	public async Task Initializing_applies_the_stored_remote_machines()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var remote = new RemoteSourceDefinition(
+			"Living Room",
+			"http://living-room-pc:8085/data.json",
+			"living_room");
+		var created = new List<RemoteSourceDefinition>();
+
+		using var aggregate = new AggregateHardwareSource(
+			new FakeHardwareSensorSource(),
+			logger,
+			definition =>
+			{
+				created.Add(definition);
+				return new NoSensorsRemote();
+			});
+		await using var integration = new LibreHardwareMonitorIntegration(
+			logger,
+			aggregate,
+			new SensorSelection(),
+			FakeAccessDiagnosis.Reachable(),
+			new RecordingCatalogNotifier());
+
+		var context = new FakeIntegrationContext();
+		var entry = MigrationTestData.SeedMigratedSensors(context.Config);
+		MigrationTestData.SeedRemoteSources(context.Config, entry, remote);
+
+		await integration.InitializeAsync(context);
+		await integration.ShutdownAsync();
+
+		Assert.That(created, Is.EqualTo(new[] { remote }));
+	}
+
 	/// <summary>
 	/// Waits for the loop to reach the hardware. Stopping before it has opened is a race the assertion
 	/// about the open count cannot describe, so the test waits for the open it is about to check.
@@ -150,5 +185,29 @@ public sealed class IntegrationSmokeTests
 		}
 
 		Assert.Fail("The condition was still false after 5 seconds.");
+	}
+
+	/// <summary>A remote that answers with nothing, for a test about wiring rather than readings.</summary>
+	private sealed class NoSensorsRemote : IHardwareSensorSource
+	{
+		public void Open()
+		{
+		}
+
+		public void Close()
+		{
+		}
+
+		public IReadOnlyList<HardwareSensor> Read(IReadOnlyCollection<string>? hardwareFilter) => [];
+
+		public IReadOnlyList<SensorIdentifier> ReadControls() => [];
+
+		public bool SetControl(string sensorId, float value) => false;
+
+		public bool ResetControl(string sensorId) => false;
+
+		public void Dispose()
+		{
+		}
 	}
 }

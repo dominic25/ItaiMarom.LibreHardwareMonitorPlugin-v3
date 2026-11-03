@@ -37,4 +37,16 @@ internal static class MigrationTestData
 			entry,
 			MigratedSensorSelection.AutoElevateKey,
 			autoElevate ? "true" : "false");
+
+	/// <summary>Records the remote machines a configuration was saved with.</summary>
+	public static void SeedRemoteSources(
+		FakeIntegrationConfig config,
+		Guid entry,
+		params RemoteSourceDefinition[] remotes) =>
+		config.SeedString(
+			entry,
+			MigratedSensorSelection.RemoteSourcesKey,
+			new MigratedSensorSelection([], null, RemoteSources: remotes)
+				.ToValues()[MigratedSensorSelection.RemoteSourcesKey]
+				.GetString()!);
 }

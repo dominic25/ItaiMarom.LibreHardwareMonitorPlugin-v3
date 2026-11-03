@@ -176,6 +176,85 @@ public sealed class MigratedSensorSelectionTests
 	}
 
 	[Test]
+	public async Task The_remote_machines_come_back_whole()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+		var remote = new RemoteSourceDefinition(
+			"Living Room",
+			"http://living-room-pc:8085/data.json",
+			"living_room");
+
+		MigrationTestData.SeedRemoteSources(config, entry, remote);
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.RemoteSources, Is.EqualTo(new[] { remote }));
+	}
+
+	[Test]
+	public async Task A_document_without_remote_machines_reads_as_an_empty_list()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.RemoteSources, Is.Empty);
+	}
+
+	[Test]
+	public async Task The_same_remote_machine_in_two_entries_is_read_once()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var first = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+		var second = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+
+		MigrationTestData.SeedRemoteSources(
+			config,
+			first,
+			new RemoteSourceDefinition("Living Room", "living-room-pc:8085", "living_room"));
+		MigrationTestData.SeedRemoteSources(
+			config,
+			second,
+			new RemoteSourceDefinition("Living Room", "http://living-room-pc:8085/data.json", "living_room"));
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.RemoteSources, Has.Count.EqualTo(1));
+	}
+
+	[Test]
+	public async Task A_remote_machine_with_an_unusable_address_is_dropped()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = config.AddEntry("Macro Deck 2 migration");
+		config.SeedString(
+			entry,
+			MigratedSensorSelection.RemoteSourcesKey,
+			"""[{"Name":"Bad","Url":"file:///C:/sensors.json","Key":"bad"}]""");
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.RemoteSources, Is.Empty);
+	}
+
+	[Test]
+	public void A_remote_list_is_stored_as_text_even_when_it_is_empty()
+	{
+		var values = new MigratedSensorSelection([CpuTotal], null, RemoteSources: []).ToValues();
+
+		// An empty list is how removing the last remote is stored; leaving the key out would read back
+		// as a document that predates remote monitoring.
+		Assert.That(values.ContainsKey(MigratedSensorSelection.RemoteSourcesKey), Is.True);
+		Assert.That(values[MigratedSensorSelection.RemoteSourcesKey].GetString(), Is.EqualTo("[]"));
+	}
+
+	[Test]
 	public void An_unset_startup_elevation_choice_is_not_stored_at_all()
 	{
 		var values = new MigratedSensorSelection([CpuTotal], null).ToValues();
