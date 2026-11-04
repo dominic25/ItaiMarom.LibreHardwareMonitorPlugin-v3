@@ -431,6 +431,13 @@ internal static class ClassicWindowPage
 					return;
 				}
 
+				// Generate a key from the URL if the key input is empty (for new rows not yet saved)
+				var key = keyInput?.value?.trim();
+				if (!key) {
+					key = generateKeyFromUrl(url);
+					if (keyInput) keyInput.value = key;
+				}
+
 				button.disabled = true;
 				button.textContent = "Testing…";
 				showTestResult(resultSpan, "Connecting…", null);
@@ -441,7 +448,7 @@ internal static class ClassicWindowPage
 				body.append("url", url);
 				if (userInput?.value) body.append("username", userInput.value);
 				if (passInput?.value) body.append("password", passInput.value);
-				if (keyInput?.value) body.append("key", keyInput.value);
+				body.append("key", key);
 
 				fetch(testUrl, { method: "POST", body: body, cache: "no-store" })
 					.then(function (response) { return response.json(); })
@@ -550,6 +557,19 @@ internal static class ClassicWindowPage
 				var div = document.createElement('div');
 				div.textContent = text;
 				return div.innerHTML;
+			}
+
+			// Generate a key from a URL, matching the server's RemoteSourceDefinition.NormalizeKey logic
+			function generateKeyFromUrl(url) {
+				// Remove protocol
+				var clean = url.replace(/^https?:\/\//i, '');
+				// Remove path/data.json
+				clean = clean.replace(/\/data\.json$/i, '').replace(/\/$/, '');
+				// Replace non-alphanumeric with underscore, lowercase
+				var key = clean.replace(/[^A-Za-z0-9]/g, '_').toLowerCase();
+				// Trim to 32 chars, trim trailing underscores
+				if (key.length > 32) key = key.substring(0, 32).replace(/_+$/, '');
+				return key || 'remote';
 			}
 
 			// Re-initialize tree elements (groups, boxes, event listeners) after adding remote sensors
