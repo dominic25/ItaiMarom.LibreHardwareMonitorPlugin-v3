@@ -95,8 +95,10 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	/// <summary>How long a window the user never finished is remembered for.</summary>
 	private static readonly TimeSpan SessionLifetime = TimeSpan.FromMinutes(30);
 
-	/// <summary>Enough for any header we answer, small enough that a stranger cannot fill our memory.</summary>
-	private const int MaximumHeadBytes = 16 * 1024;
+	/// <summary>Enough for any header we answer, small enough that a stranger cannot fill our memory.
+	/// Increased to 64KB to accommodate long query strings on the /values endpoint when many sensors
+	/// have unit selectors (each adds ~100 chars to the query string).</summary>
+	private const int MaximumHeadBytes = 64 * 1024;
 
 	private const int MaximumBodyBytes = 1024 * 1024;
 
@@ -371,6 +373,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		// can read the sensors through this port.
 		if (IsReadingsRequest(request))
 		{
+			_logger.Debug("Values request: {Target}", request.Target);
 			return key is not null && TryGetSession(key, out _)
 				? await ReadingsAsync(QueryDefaults(request.Target), QueryUnits(request.Target), cancellationToken).ConfigureAwait(false)
 				: ClosedWindow();

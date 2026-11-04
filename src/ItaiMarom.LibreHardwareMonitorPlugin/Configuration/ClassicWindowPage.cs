@@ -220,7 +220,6 @@ internal static class ClassicWindowPage
 
 			<div class="toolbar">
 				<input type="search" id="filter" placeholder="Filter sensors&hellip;" aria-label="Filter sensors">
-				<span id="updated"></span>
 				<span id="counts"></span>
 			</div>
 
@@ -410,7 +409,7 @@ internal static class ClassicWindowPage
 			// to. Only those cells are touched, so nothing the user has ticked, opened or typed moves under
 			// them, and a cell is never matched by position: it carries the sensor's resource id.
 			var cells = [].slice.call(tree.querySelectorAll("[data-value]"));
-			var updated = document.getElementById("updated");
+			console.log("[LHM] Found", cells.length, "value cells");
 			var valuesUrl = "__VALUES__";
 
 			// The readings are asked for in the defaults the editor is showing, not the ones the plugin
@@ -421,6 +420,7 @@ internal static class ClassicWindowPage
 					query += "&default_unit_kind=" + encodeURIComponent(defaultSelects[i].getAttribute("data-default-kind"));
 					query += "&default_unit_value=" + encodeURIComponent(defaultSelects[i].value);
 				}
+				console.log("[LHM] defaultsQuery:", query);
 				return query;
 			}
 
@@ -429,9 +429,11 @@ internal static class ClassicWindowPage
 			function unitsQuery() {
 				var query = "";
 				var unitSelects = tree.querySelectorAll('select[name="unit_value"]');
+				console.log("[LHM] Found", unitSelects.length, "unit selectors");
 				for (var i = 0; i < unitSelects.length; i++) {
 					var select = unitSelects[i];
 					var sensorId = select.previousElementSibling?.value; // hidden unit_sensor input
+					console.log("[LHM] Selector", i, "sensorId:", sensorId, "value:", select.value);
 					if (sensorId) {
 						query += "&unit_sensor=" + encodeURIComponent(sensorId);
 						query += "&unit_value=" + encodeURIComponent(select.value);
@@ -444,15 +446,15 @@ internal static class ClassicWindowPage
 				if (document.hidden) return;
 
 				var url = valuesUrl + defaultsQuery() + unitsQuery();
-				// console.log("[LHM] Fetching:", url);
+				console.log("[LHM] Fetching:", url);
 				fetch(url, { cache: "no-store" })
 					.then(function (response) {
-						// console.log("[LHM] Response:", response.status, response.ok);
+						console.log("[LHM] Response:", response.status, response.ok);
 						return response.ok ? response.json() : null;
 					})
 					.then(function (values) {
+						console.log("[LHM] Values:", values);
 						if (!values) return;
-						// console.log("[LHM] Values:", values);
 
 						for (var i = 0; i < cells.length; i++) {
 							var cell = cells[i];
@@ -461,14 +463,9 @@ internal static class ClassicWindowPage
 							cell.textContent = missing ? "\u2014" : value;
 							cell.classList.toggle("none", missing);
 						}
-
-						if (updated) updated.textContent = "values updated " + new Date().toLocaleTimeString();
 					})
 					.catch(function (err) {
-						// Reading stopped - the plugin is closing, or this page is on its way out. The next
-						// tick asks again, and what is on screen is left as it was rather than blanked.
-						// console.log("[LHM] Fetch error:", err);
-						if (updated) updated.textContent = "live values unavailable";
+						console.log("[LHM] Fetch error:", err);
 					});
 			}
 
