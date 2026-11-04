@@ -80,6 +80,20 @@ public static class SensorUnits
 	private static readonly SensorUnit[] ThroughputOptions =
 		[SensorUnit.BytesPerSecond, SensorUnit.KilobytesPerSecond, SensorUnit.MegabytesPerSecond];
 
+	/// <summary>
+	/// The kinds that offer a choice, in the order the window lists them. It is the same set
+	/// <see cref="IsSupported" /> accepts, so a defaults editor and a per-sensor selector cannot disagree
+	/// about which kinds exist.
+	/// </summary>
+	public static IReadOnlyList<SensorType> SupportedKinds { get; } =
+	[
+		SensorType.Temperature,
+		SensorType.Data,
+		SensorType.SmallData,
+		SensorType.Clock,
+		SensorType.Throughput,
+	];
+
 	/// <summary>Whether the plugin offers any unit choice for this kind of reading.</summary>
 	public static bool IsSupported(SensorType sensorType) => sensorType is
 		SensorType.Temperature or
@@ -100,6 +114,58 @@ public static class SensorUnits
 			nameof(sensorType),
 			sensorType,
 			"This kind of reading has no unit choice."),
+	};
+
+	/// <summary>
+	/// The unit a sensor of this kind uses when it has no choice of its own: the configured default when
+	/// one is present and valid, and the library's own otherwise.
+	/// </summary>
+	public static SensorUnit DefaultFor(
+		SensorType sensorType,
+		IReadOnlyDictionary<SensorType, SensorUnit>? defaults)
+	{
+		if (!IsSupported(sensorType))
+		{
+			throw new ArgumentOutOfRangeException(
+				nameof(sensorType),
+				sensorType,
+				"This kind of reading has no unit choice.");
+		}
+
+		return defaults is not null
+			&& defaults.TryGetValue(sensorType, out var unit)
+			&& IsValidFor(sensorType, unit)
+				? unit
+				: DefaultFor(sensorType);
+	}
+
+	/// <summary>
+	/// A complete defaults map: every kind that offers a choice, with the configured unit where it is
+	/// valid and the library's own everywhere else. Storing and rendering a complete map is what lets a
+	/// document written by an older version - or one with a hand-edited entry - read back as a working
+	/// default rather than as a kind with no answer.
+	/// </summary>
+	public static IReadOnlyDictionary<SensorType, SensorUnit> NormalizeDefaults(
+		IReadOnlyDictionary<SensorType, SensorUnit>? defaults)
+	{
+		var normalized = new Dictionary<SensorType, SensorUnit>(SupportedKinds.Count);
+		foreach (var sensorType in SupportedKinds)
+		{
+			normalized[sensorType] = DefaultFor(sensorType, defaults);
+		}
+
+		return normalized;
+	}
+
+	/// <summary>The text that names a kind in the defaults editor, for example <c>Small data</c>.</summary>
+	public static string Label(SensorType sensorType) => sensorType switch
+	{
+		SensorType.Temperature => "Temperature",
+		SensorType.Data => "Data",
+		SensorType.SmallData => "Small data",
+		SensorType.Clock => "Clock",
+		SensorType.Throughput => "Throughput",
+		_ => sensorType.ToString(),
 	};
 
 	/// <summary>The units the window offers for a kind, in the order it shows them.</summary>

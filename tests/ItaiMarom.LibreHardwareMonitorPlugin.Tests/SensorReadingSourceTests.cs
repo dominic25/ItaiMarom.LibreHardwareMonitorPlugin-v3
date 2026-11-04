@@ -53,6 +53,59 @@ public sealed class SensorReadingSourceTests
 	}
 
 	[Test]
+	public void A_sensor_with_no_choice_of_its_own_follows_its_kind_s_default_unit()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+
+		var values = SensorReadingSource.ValuesOf(
+			[new HardwareSensor(sensor, 50f)],
+			units: null,
+			defaults: new Dictionary<SensorType, SensorUnit>
+			{
+				[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			});
+
+		// The window opens before anything has been saved, so a reading and the selector beside it have
+		// to agree on the same default.
+		Assert.That(values[sensor.ResourceId], Is.EqualTo("122 °F"));
+	}
+
+	[Test]
+	public void A_sensor_s_own_choice_wins_over_its_kind_s_default()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+
+		var values = SensorReadingSource.ValuesOf(
+			[new HardwareSensor(sensor, 50f)],
+			new Dictionary<string, SensorUnit>(StringComparer.Ordinal)
+			{
+				[sensor.ResourceId] = SensorUnit.Celsius,
+			},
+			new Dictionary<SensorType, SensorUnit>
+			{
+				[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			});
+
+		Assert.That(values[sensor.ResourceId], Is.EqualTo("50 °C"));
+	}
+
+	[Test]
+	public void A_sensor_already_carrying_a_unit_is_not_overwritten_by_the_default()
+	{
+		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature)
+			with { DisplayUnit = SensorUnit.Celsius };
+
+		var values = SensorReadingSource.ValuesOf(
+			[new HardwareSensor(sensor, 50f)],
+			defaults: new Dictionary<SensorType, SensorUnit>
+			{
+				[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			});
+
+		Assert.That(values[sensor.ResourceId], Is.EqualTo("50 °C"));
+	}
+
+	[Test]
 	public void The_units_a_selection_carries_are_keyed_the_way_the_window_names_a_sensor()
 	{
 		var sensor = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature)

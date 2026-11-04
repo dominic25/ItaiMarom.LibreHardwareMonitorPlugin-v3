@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using LibreHardwareMonitor.Hardware;
 using Serilog;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
@@ -30,6 +31,10 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 /// The unit each configured sensor is shown in, keyed by resource id. The window opens its selectors on
 /// these so pressing Save without touching one cannot change the unit by accident.
 /// </param>
+/// <param name="UnitDefaults">
+/// The unit each sensor kind uses when a sensor has no choice of its own. The window opens its defaults
+/// editor on these, and a selector that is left on <em>Default</em> follows them.
+/// </param>
 internal sealed record ClassicWindowOpening(
 	string Title,
 	IReadOnlyList<SensorCategory> Categories,
@@ -43,7 +48,8 @@ internal sealed record ClassicWindowOpening(
 	IReadOnlyDictionary<string, string?>? Values = null,
 	bool AutoElevate = false,
 	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null,
-	IReadOnlyDictionary<string, SensorUnit>? DisplayUnits = null);
+	IReadOnlyDictionary<string, SensorUnit>? DisplayUnits = null,
+	IReadOnlyDictionary<SensorType, SensorUnit>? UnitDefaults = null);
 
 /// <summary>One remote machine as the window's form carried it back, before it is validated.</summary>
 internal sealed record ClassicWindowRemote(string? Name, string? Url, string? Key);
@@ -54,7 +60,8 @@ internal sealed record ClassicWindowPayload(
 	double? PollingMilliseconds,
 	bool AutoElevate,
 	IReadOnlyList<ClassicWindowRemote>? Remotes = null,
-	IReadOnlyDictionary<string, SensorUnit>? Units = null);
+	IReadOnlyDictionary<string, SensorUnit>? Units = null,
+	IReadOnlyDictionary<SensorType, SensorUnit>? DefaultUnits = null);
 
 /// <summary>
 /// A loopback-only web server with one job: serve the Macro Deck 2 dialog rebuilt as a page, and collect
@@ -458,7 +465,8 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			// A checkbox is submitted only while it is ticked, so its presence is the whole answer.
 			form.ContainsKey("auto_elevate"),
 			ReadRemotes(form),
-			ReadUnits(form));
+			ReadUnits(form),
+			ReadDefaultUnits(form));
 
 		_logger.Information(
 			"The classic sensor window saved {SensorCount} sensors.",
@@ -559,6 +567,32 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		}
 
 		return units;
+	}
+
+	/// <summary>
+	/// The defaults editor, two parallel lists joined back into a kind-to-unit map. A kind this version
+	/// does not offer, or a unit that does not suit its kind, is dropped; the page posts every kind, so a
+	/// missing pair is a form that predates defaults rather than a kind the user cleared.
+	/// </summary>
+	private static Dictionary<SensorType, SensorUnit> ReadDefaultUnits(Dictionary<string, List<string>> form)
+	{
+		var kinds = ValuesOf(form, "default_unit_kind");
+		var values = ValuesOf(form, "default_unit_value");
+		var count = Math.Min(kinds.Count, values.Count);
+		var defaults = new Dictionary<SensorType, SensorUnit>(count);
+
+		for (var index = 0; index < count; index++)
+		{
+			if (Enum.TryParse<SensorType>(kinds[index], ignoreCase: true, out var sensorType)
+				&& SensorUnits.IsSupported(sensorType)
+				&& SensorUnits.TryParse(values[index], out var unit)
+				&& SensorUnits.IsValidFor(sensorType, unit))
+			{
+				defaults[sensorType] = unit;
+			}
+		}
+
+		return defaults;
 	}
 
 	private static List<string> ValuesOf(Dictionary<string, List<string>> form, string name) =>

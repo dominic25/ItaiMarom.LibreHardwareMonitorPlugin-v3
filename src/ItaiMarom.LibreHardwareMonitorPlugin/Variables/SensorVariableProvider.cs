@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using LibreHardwareMonitor.Hardware;
 using MacroDeck.Localization;
 using MacroDeck.Sdk.Variables;
 
@@ -45,6 +46,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 
 	private IReadOnlyList<SensorVariable>? _eager;
 	private IReadOnlyList<SensorIdentifier>? _eagerFor;
+	private IReadOnlyDictionary<SensorType, SensorUnit>? _eagerDefaults;
 
 	public SensorVariableProvider(HardwareMonitor monitor, SensorSelection selection)
 	{
@@ -317,14 +319,18 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	private IReadOnlyList<SensorVariable> EagerVariables()
 	{
 		var sensors = _selection.Sensors;
-		if (_eager is { } cached && ReferenceEquals(sensors, _eagerFor))
+		var defaults = _selection.UnitDefaults;
+		if (_eager is { } cached
+			&& ReferenceEquals(sensors, _eagerFor)
+			&& ReferenceEquals(defaults, _eagerDefaults))
 		{
 			return cached;
 		}
 
-		var assigned = SensorVariableNaming.Assign(sensors);
+		var assigned = SensorVariableNaming.Assign(sensors.Select(_selection.WithDefaultUnit));
 
 		_eagerFor = sensors;
+		_eagerDefaults = defaults;
 		_eager = assigned;
 		return assigned;
 	}
@@ -346,7 +352,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		var table = Volatile.Read(ref _snapshot)?.Table;
 		if (table is not null && table.TryGetSensor(localId, out var found))
 		{
-			sensor = found;
+			sensor = _selection.WithDefaultUnit(found);
 			return true;
 		}
 
@@ -400,13 +406,13 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	/// A catalog resource: on-demand, named the way a user already knows the sensor, writable when the
 	/// hardware gave it a control, and polled at the loop's interval so a bound widget tracks the hardware.
 	/// </summary>
-	private static VariableDefinition CatalogDefinition(
+	private VariableDefinition CatalogDefinition(
 		SensorIdentifier sensor,
 		string resourceId,
 		string? parentId,
 		TimeSpan refreshInterval) =>
 		SensorDefinition.Describe(
-			sensor,
+			_selection.WithDefaultUnit(sensor),
 			VariableDefinition.OnDemand(resourceId, VariableType.Numeric),
 			refreshInterval) with
 		{

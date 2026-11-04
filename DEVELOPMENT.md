@@ -162,8 +162,22 @@ a rate in KB/s is choosing how to display the reading, not asking the cache to c
 - **The choice is stored per sensor.** It travels as `DisplayUnit` on `MigratedSensor` and is restored
   only when `SensorUnits.IsValidFor` accepts it against the stored kind, so a hand-edited or obsolete
   document cannot turn a percentage into a size.
+- **Defaults are per kind, in one map.** `SensorUnits.SupportedKinds` is the set that offers a choice and
+  `NormalizeDefaults` gives every one an answer; `SensorSelection` carries the map beside the selection.
+  It is stored under `unit_defaults` as a complete JSON map, so a document from an older version - or one
+  with a stale pair - reads back with the library's own unit for anything it does not name. A kind this
+  version does not offer, or a unit that does not suit its kind, is dropped.
+- **"Default" is not a stored choice.** The per-sensor selector carries an empty option beside the real
+  units. An empty value is dropped by `ClassicWindowServer.ReadUnits`, so the sensor keeps
+  `DisplayUnit == null` and keeps following its kind's default. Storing the default as an explicit choice
+  would freeze it onto the sensor when the default later changed.
+- **Defaults reach every surface.** `SensorSelection.WithDefaultUnit` applies the map to eager variables,
+  catalog definitions, catalog resolution and the window's value column, so a sensor that never made a
+  choice looks the same wherever it is read. `SensorVariableProvider` caches its eager declarations by the
+  selection list and the defaults map, so a changed default invalidates the cache.
 - **The window and the flow agree.** The page posts two parallel lists, `unit_sensor` and `unit_value`,
-  with the resource id in a hidden field beside each selector. `ClassicWindowServer` joins them; the
+  with the resource id in a hidden field beside each selector, and a second pair
+  (`default_unit_kind`/`default_unit_value`) for the defaults editor. `ClassicWindowServer` joins them; the
   config flow validates them against the sensors it resolved before storing them. The window also opens
   its selectors on the stored choice, so pressing Save without touching one keeps it.
 - **Remote values are normalized first.** A remote server sends formatted text such as `12.2 GB` or
@@ -473,6 +487,8 @@ Step-by-step port from the Macro Deck 2 plugin:
       read-only, edited in the same sensor window and stored with the sensor selection.
 - [x] Per-sensor display units - °C/°F, GB/GiB, MB/MiB, MHz/GHz and B/s/KB/s/MB/s, chosen beside each
       reading in the sensor window and stored with the sensor selection.
+- [x] Default display units per sensor kind - a defaults editor above the tree, stored under
+      `unit_defaults`, which every sensor without a choice of its own follows.
 
 ## Maybe
 

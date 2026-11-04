@@ -1,5 +1,6 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
+using LibreHardwareMonitor.Hardware;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 
@@ -38,7 +39,8 @@ internal sealed class SensorReadingSource : ISensorReadingSource
 	public async Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(CancellationToken cancellationToken) =>
 		ValuesOf(
 			await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false),
-			UnitsOf(_selection));
+			UnitsOf(_selection),
+			_selection?.UnitDefaults);
 
 	/// <summary>
 	/// Turns one read of a machine into the window's pairs. The first sensor under a resource id is the
@@ -51,7 +53,8 @@ internal sealed class SensorReadingSource : ISensorReadingSource
 	/// </remarks>
 	public static IReadOnlyDictionary<string, string?> ValuesOf(
 		IReadOnlyList<HardwareSensor> samples,
-		IReadOnlyDictionary<string, SensorUnit>? units = null)
+		IReadOnlyDictionary<string, SensorUnit>? units = null,
+		IReadOnlyDictionary<SensorType, SensorUnit>? defaults = null)
 	{
 		ArgumentNullException.ThrowIfNull(samples);
 
@@ -62,6 +65,12 @@ internal sealed class SensorReadingSource : ISensorReadingSource
 			if (units is not null && units.TryGetValue(sensor.ResourceId, out var unit))
 			{
 				sensor = sensor with { DisplayUnit = unit };
+			}
+			else if (sensor.DisplayUnit is null && SensorUnits.IsSupported(sensor.SensorType))
+			{
+				// A sensor no one chose a unit for follows its kind's default, so the reading and the
+				// selector beside it agree even before the window has been saved once.
+				sensor = sensor with { DisplayUnit = SensorUnits.DefaultFor(sensor.SensorType, defaults) };
 			}
 
 			values.TryAdd(sensor.ResourceId, SensorFormatting.Display(sensor, sample.Value));

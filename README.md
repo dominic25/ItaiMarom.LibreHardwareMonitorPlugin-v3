@@ -52,9 +52,11 @@ without them.
    branch are there for machines that report a few hundred sensors, and a dash means "nothing to report
    right now" - a stopped fan, a drive that is not answering - never a zero.
 3. Set the **polling rate** at the bottom of the window, in milliseconds.
-4. Where a reading can be shown in more than one unit, a selector sits beside it: °C or °F, GB or GiB,
-   MB or MiB, MHz or GHz, and B/s, KB/s or MB/s. The value in the window and the variable share the
-   choice, and leaving the selector alone keeps the default.
+4. A **Default units** section above the tree sets the unit every sensor of a kind uses - °C or °F, GB or
+   GiB, MB or MiB, MHz or GHz, and B/s, KB/s or MB/s - including the sensors the catalog offers. Where a
+   reading can be shown in more than one unit, a selector sits beside it, opening on **Default**: leaving
+   it there follows the kind's default, and choosing a unit overrides the default for that sensor only.
+   The value in the window and the variable share the choice.
 5. Tick **Start elevated readings at startup** if you want the plugin to ask Windows for administrator
    rights at every Macro Deck start, rather than only when you press **Enable elevated readings** in the
    issue list. Leave it clear to be prompted only when you press that button.
@@ -97,9 +99,11 @@ There are two ways a sensor becomes a variable, and both are used the same way a
   from the catalog is just as writable as a ticked one, so it works in the Slider the same way.
 
 A variable carries its unit and how to render it, so a voltage reads as `3.4 V` by itself, a load as
-`13 %`, and a disk's used space as `19.4 GB`. There is nothing to append in the text. The unit is the one
-chosen in the sensor window: temperatures default to °C, sizes to GB and MB, clocks to MHz, and throughput
-to B/s, with Fahrenheit, GiB and MiB, GHz, and KB/s or MB/s available per sensor. The plugin keeps the
+`13 %`, and a disk's used space as `19.4 GB`. There is nothing to append in the text. The unit is the
+sensor's own choice when it has one, and otherwise the default for its kind from the top of the sensor
+window: temperatures default to °C, sizes to GB and MB, clocks to MHz, and throughput to B/s, with
+Fahrenheit, GiB and MiB, GHz, and KB/s or MB/s available as defaults or per sensor. Catalog sensors follow
+the same defaults, so a variable bound there looks like one ticked in the window. The plugin keeps the
 library's own reading internally and converts it for the variable, so changing a unit later changes what
 the widget shows without changing the hardware being read.
 

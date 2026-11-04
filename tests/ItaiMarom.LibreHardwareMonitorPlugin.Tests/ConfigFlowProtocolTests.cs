@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
@@ -444,9 +445,11 @@ public sealed class ConfigFlowProtocolTests
 		var page = await WindowClient.ReadPageAsync(await ContinueAsync(harness, Session));
 
 		// Pressing Save without touching the selector has to keep the unit, so what opens must already
-		// be the stored choice.
-		Assert.That(page, Does.Contain("<option value=\"Fahrenheit\" selected>"));
-		Assert.That(page, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+		// be the stored choice - which also means the default option must not claim it.
+		var selector = WindowClient.UnitSelectorOf(page, cpu);
+		Assert.That(selector, Does.Contain("<option value=\"Fahrenheit\" selected>"));
+		Assert.That(selector, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+		Assert.That(selector, Does.Not.Contain("<option value=\"\" selected>"));
 	}
 
 	[Test]
@@ -473,6 +476,106 @@ public sealed class ConfigFlowProtocolTests
 		var restored = await RestoreAsync(result.GetProperty("values"), logger);
 
 		Assert.That(restored.Sensors.Single().DisplayUnit, Is.Null);
+	}
+
+	[Test]
+	public async Task Saving_the_window_stores_the_default_units()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var result = await SaveWindowAsync(
+			harness,
+			Session,
+			[cpu.ResourceId],
+			1000,
+			defaults:
+			[
+				(SensorType.Temperature, SensorUnit.Fahrenheit),
+				(SensorType.Data, SensorUnit.Gibibytes),
+			]);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.UnitDefaults, Is.Not.Null);
+		Assert.That(restored.UnitDefaults![SensorType.Temperature], Is.EqualTo(SensorUnit.Fahrenheit));
+		Assert.That(restored.UnitDefaults[SensorType.Data], Is.EqualTo(SensorUnit.Gibibytes));
+
+		// What the window posted was partial; what is stored is complete, so every kind that offers a
+		// choice has an answer on the next start.
+		Assert.That(restored.UnitDefaults, Has.Count.EqualTo(SensorUnits.SupportedKinds.Count));
+		Assert.That(restored.UnitDefaults[SensorType.SmallData], Is.EqualTo(SensorUnit.Megabytes));
+	}
+
+	[Test]
+	public async Task The_window_reopens_on_the_stored_default_units()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		var entry = MigrationTestData.SeedMigratedSensors(harness.Context.Config, cpu);
+		MigrationTestData.SeedUnitDefaults(
+			harness.Context.Config,
+			entry,
+			new Dictionary<SensorType, SensorUnit>
+			{
+				[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			});
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		var page = await WindowClient.ReadPageAsync(await ContinueAsync(harness, Session));
+
+		var selector = WindowClient.DefaultSelectorOf(page, SensorType.Temperature);
+		Assert.That(selector, Does.Contain("<option value=\"Fahrenheit\" selected>"));
+		Assert.That(selector, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+
+		// A sensor that never made a choice follows that default, and its selector says so instead of
+		// pretending the current default is an explicit choice.
+		var sensorSelector = WindowClient.UnitSelectorOf(page, cpu);
+		Assert.That(
+			sensorSelector,
+			Does.Contain($"<option value=\"\" selected>Default ({WebUtility.HtmlEncode("°F")})</option>"));
+		Assert.That(page, Does.Contain("122 " + WebUtility.HtmlEncode("°F")));
+	}
+
+	[Test]
+	public async Task A_sensor_left_on_default_is_not_frozen_to_it()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		var entry = MigrationTestData.SeedMigratedSensors(harness.Context.Config, cpu);
+		MigrationTestData.SeedUnitDefaults(
+			harness.Context.Config,
+			entry,
+			new Dictionary<SensorType, SensorUnit>
+			{
+				[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			});
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		// The page posts the empty option for a sensor that follows the default, and a window that
+		// predates defaults posts nothing at all. Either way the sensor must keep following.
+		var result = await SaveWindowAsync(harness, Session, [cpu.ResourceId], 1000);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.Sensors.Single().DisplayUnit, Is.Null);
+		Assert.That(restored.UnitDefaults, Is.Not.Null);
+		Assert.That(restored.UnitDefaults![SensorType.Temperature], Is.EqualTo(SensorUnit.Fahrenheit));
 	}
 
 	[Test]
@@ -585,10 +688,11 @@ public sealed class ConfigFlowProtocolTests
 		double? polling = null,
 		bool autoElevate = false,
 		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null,
-		IEnumerable<(string Sensor, SensorUnit Unit)>? units = null)
+		IEnumerable<(string Sensor, SensorUnit Unit)>? units = null,
+		IEnumerable<(SensorType Kind, SensorUnit Unit)>? defaults = null)
 	{
 		var window = await ContinueAsync(harness, sessionId);
-		var callback = await WindowClient.SaveAsync(window, ticked, polling, autoElevate, remotes, units);
+		var callback = await WindowClient.SaveAsync(window, ticked, polling, autoElevate, remotes, units, defaults);
 
 		return await ResumeAsync(harness, sessionId, callback);
 	}

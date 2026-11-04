@@ -46,6 +46,7 @@ internal static class ClassicWindowPage
 	private const string RemotesMarker = "__REMOTES__";
 	private const string RemoteTemplateMarker = "__REMOTE_TEMPLATE__";
 	private const string RemotesOpenMarker = "__REMOTES_OPEN__";
+	private const string DefaultsMarker = "__DEFAULTS__";
 
 	/// <summary>What a window with no readings to show has: every cell renders as "no reading".</summary>
 	private static readonly IReadOnlyDictionary<string, string?> EmptyValues =
@@ -128,6 +129,24 @@ internal static class ClassicWindowPage
 		.remote-row input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 		.remote-row button.remove { padding: 7px 12px; }
 		#addRemote { margin-top: 2px; }
+		.defaults {
+			margin: 10px 22px 0; border: 1px solid var(--line); border-radius: 8px;
+			background: var(--panel);
+		}
+		.defaults > summary { padding: 9px 12px; font-weight: 600; }
+		.default-body { padding: 2px 12px 12px; }
+		.default-body .hint { margin: 0 0 10px; color: var(--dim); max-width: 92ch; }
+		.default-rows {
+			display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+			gap: 8px 18px;
+		}
+		.default-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+		.default-row label { color: var(--dim); }
+		.default-row select {
+			padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px;
+			background: var(--bg); color: var(--text); font: inherit;
+		}
+		.default-row select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 		.tree { flex: 1; overflow: auto; padding: 10px 12px 18px; }
 		details { border-radius: 6px; }
 		summary {
@@ -210,6 +229,14 @@ internal static class ClassicWindowPage
 					<div id="remoteRows">__REMOTES__</div>
 					<button type="button" id="addRemote">Add remote machine</button>
 					<template id="remoteTemplate">__REMOTE_TEMPLATE__</template>
+				</div>
+			</details>
+
+			<details class="defaults" id="defaults" open>
+				<summary><span>Default units</span></summary>
+				<div class="default-body">
+					<p class="hint">The unit a sensor of each kind is shown in when it has no choice of its own. Every sensor still set to <em>Default</em> follows these - including the ones the catalog offers - and a sensor's own selector overrides them.</p>
+					<div class="default-rows" id="defaultRows">__DEFAULTS__</div>
 				</div>
 			</details>
 
@@ -321,6 +348,27 @@ internal static class ClassicWindowPage
 
 			syncAll();
 
+			// A sensor selector that is left on "Default" follows the defaults editor above it. Changing a
+			// default only rewrites the label of those selectors; a sensor with an explicit choice keeps it,
+			// which is what makes the default a default rather than an override.
+			var defaultSelects = [].slice.call(document.querySelectorAll("select[data-default-kind]"));
+
+			function syncDefaultLabels(select) {
+				var kind = select.getAttribute("data-default-kind");
+				var symbol = select.options[select.selectedIndex].textContent;
+				var units = tree.querySelectorAll('select[data-kind="' + kind + '"]');
+
+				for (var i = 0; i < units.length; i++) {
+					if (units[i].value === "" && units[i].options.length > 0) {
+						units[i].options[0].textContent = "Default (" + symbol + ")";
+					}
+				}
+			}
+
+			for (var d = 0; d < defaultSelects.length; d++) {
+				defaultSelects[d].addEventListener("change", function () { syncDefaultLabels(this); });
+			}
+
 			// Remote machines are rows of three fields each, so what the form posts is three parallel
 			// lists. A row added here starts as a blank line; the plugin drops one it cannot turn into an
 			// address, and the tree it would add to is only rebuilt the next time the window opens.
@@ -415,7 +463,52 @@ internal static class ClassicWindowPage
 			.Replace(AutoElevateMarker, opening.AutoElevate ? " checked" : string.Empty, StringComparison.Ordinal)
 			.Replace(RemotesOpenMarker, opening.RemoteSources is { Count: > 0 } ? " open" : string.Empty, StringComparison.Ordinal)
 			.Replace(RemotesMarker, RenderRemotes(opening), StringComparison.Ordinal)
-			.Replace(RemoteTemplateMarker, RenderRemoteRow(null), StringComparison.Ordinal);
+			.Replace(RemoteTemplateMarker, RenderRemoteRow(null), StringComparison.Ordinal)
+			.Replace(DefaultsMarker, RenderDefaults(opening), StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// The defaults editor: one row per kind that offers a unit choice. The kind travels in a hidden field
+	/// beside its selector, so the two lists the form posts stay aligned whatever the order of the rows.
+	/// </summary>
+	private static string RenderDefaults(ClassicWindowOpening opening)
+	{
+		var builder = new StringBuilder();
+
+		foreach (var sensorType in SensorUnits.SupportedKinds)
+		{
+			var chosen = SensorUnits.DefaultFor(sensorType, opening.UnitDefaults);
+			var label = SensorUnits.Label(sensorType);
+
+			builder.Append("<div class=\"default-row\"><label for=\"default_")
+				.Append(sensorType)
+				.Append("\">")
+				.Append(WebUtility.HtmlEncode(label))
+				.Append("</label><input type=\"hidden\" name=\"default_unit_kind\" value=\"")
+				.Append(sensorType)
+				.Append("\"><select name=\"default_unit_value\" id=\"default_")
+				.Append(sensorType)
+				.Append("\" aria-label=\"Default unit for ")
+				.Append(WebUtility.HtmlEncode(label))
+				.Append("\" data-default-kind=\"")
+				.Append(sensorType)
+				.Append("\">");
+
+			foreach (var option in SensorUnits.OptionsFor(sensorType))
+			{
+				builder.Append("<option value=\"")
+					.Append(option.ToString())
+					.Append('"')
+					.Append(option == chosen ? " selected" : string.Empty)
+					.Append('>')
+					.Append(WebUtility.HtmlEncode(SensorUnits.Symbol(option)))
+					.Append("</option>");
+			}
+
+			builder.Append("</select></div>");
+		}
+
+		return builder.ToString();
 	}
 
 	/// <summary>
@@ -482,6 +575,7 @@ internal static class ClassicWindowPage
 		var selected = opening.SelectedResourceIds.ToHashSet(StringComparer.Ordinal);
 		var values = opening.Values ?? EmptyValues;
 		var units = opening.DisplayUnits;
+		var defaults = opening.UnitDefaults;
 		var builder = new StringBuilder();
 
 		foreach (var root in categories.GroupBy(category => category.RootName, StringComparer.Ordinal))
@@ -516,7 +610,7 @@ internal static class ClassicWindowPage
 						? chosen
 						: sensor.DisplayUnit;
 
-					AppendSensor(builder, sensor, selected.Contains(sensor.ResourceId), values, unit);
+					AppendSensor(builder, sensor, selected.Contains(sensor.ResourceId), values, unit, defaults);
 				}
 
 				builder.Append("\t\t\t</ul>\n\t\t</details>\n");
@@ -583,7 +677,8 @@ internal static class ClassicWindowPage
 		SensorIdentifier sensor,
 		bool ticked,
 		IReadOnlyDictionary<string, string?> values,
-		SensorUnit? unit)
+		SensorUnit? unit,
+		IReadOnlyDictionary<SensorType, SensorUnit>? defaults)
 	{
 		builder.Append("\t\t\t<li><label><input type=\"checkbox\" name=\"sensors\" value=\"")
 			.Append(WebUtility.HtmlEncode(sensor.ResourceId))
@@ -598,7 +693,7 @@ internal static class ClassicWindowPage
 		builder.Append(ValueCell(sensor, values))
 			.Append("</label>");
 
-		AppendUnitSelector(builder, sensor, unit);
+		AppendUnitSelector(builder, sensor, unit, defaults);
 
 		builder.Append("</li>\n");
 	}
@@ -608,7 +703,16 @@ internal static class ClassicWindowPage
 	/// hidden field next to it, so the two lists the form posts stay aligned even where a kind - a fan
 	/// speed, a voltage - has no selector at all.
 	/// </summary>
-	private static void AppendUnitSelector(StringBuilder builder, SensorIdentifier sensor, SensorUnit? unit)
+	/// <remarks>
+	/// An empty value means "follow the default for this kind", which is what a sensor that never made a
+	/// choice posts. That is deliberately different from posting the default's own unit: if Save stored
+	/// the default as an explicit choice, changing the default later would leave the sensor behind.
+	/// </remarks>
+	private static void AppendUnitSelector(
+		StringBuilder builder,
+		SensorIdentifier sensor,
+		SensorUnit? unit,
+		IReadOnlyDictionary<SensorType, SensorUnit>? defaults)
 	{
 		var options = SensorUnits.OptionsFor(sensor.SensorType);
 		if (options.Count == 0)
@@ -616,15 +720,22 @@ internal static class ClassicWindowPage
 			return;
 		}
 
+		var defaultUnit = SensorUnits.DefaultFor(sensor.SensorType, defaults);
 		var chosen = unit is { } candidate && SensorUnits.IsValidFor(sensor.SensorType, candidate)
 			? candidate
-			: SensorUnits.DefaultFor(sensor.SensorType);
+			: (SensorUnit?)null;
 
 		builder.Append("<span class=\"unit\"><input type=\"hidden\" name=\"unit_sensor\" value=\"")
 			.Append(WebUtility.HtmlEncode(sensor.ResourceId))
 			.Append("\"><select name=\"unit_value\" aria-label=\"Unit for ")
 			.Append(WebUtility.HtmlEncode(sensor.LegacyToken))
-			.Append("\">");
+			.Append("\" data-kind=\"")
+			.Append(sensor.SensorType)
+			.Append("\"><option value=\"\"")
+			.Append(chosen is null ? " selected" : string.Empty)
+			.Append(">Default (")
+			.Append(WebUtility.HtmlEncode(SensorUnits.Symbol(defaultUnit)))
+			.Append(")</option>");
 
 		foreach (var option in options)
 		{

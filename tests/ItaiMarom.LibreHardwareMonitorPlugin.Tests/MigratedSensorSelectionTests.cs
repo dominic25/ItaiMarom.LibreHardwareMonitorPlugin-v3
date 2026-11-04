@@ -298,4 +298,97 @@ public sealed class MigratedSensorSelectionTests
 		// leaves the key out, and a missing key reads back as off.
 		Assert.That(values.ContainsKey(MigratedSensorSelection.AutoElevateKey), Is.False);
 	}
+
+	[Test]
+	public async Task The_default_units_come_back_whole()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+
+		MigrationTestData.SeedUnitDefaults(
+			config,
+			entry,
+			new Dictionary<SensorType, SensorUnit>
+			{
+				[SensorType.Temperature] = SensorUnit.Fahrenheit,
+				[SensorType.Data] = SensorUnit.Gibibytes,
+			});
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.UnitDefaults, Is.Not.Null);
+		Assert.That(restored.UnitDefaults![SensorType.Temperature], Is.EqualTo(SensorUnit.Fahrenheit));
+		Assert.That(restored.UnitDefaults[SensorType.Data], Is.EqualTo(SensorUnit.Gibibytes));
+
+		// The map is complete on read, so a kind the document did not mention still has an answer.
+		Assert.That(restored.UnitDefaults, Has.Count.EqualTo(SensorUnits.SupportedKinds.Count));
+		Assert.That(restored.UnitDefaults[SensorType.SmallData], Is.EqualTo(SensorUnit.Megabytes));
+	}
+
+	[Test]
+	public async Task A_document_without_default_units_reads_them_as_unset()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		// Null means "nothing was ever chosen", which the selection turns into the library's own units.
+		Assert.That(restored.UnitDefaults, Is.Null);
+	}
+
+	[Test]
+	public async Task A_stored_default_that_does_not_suit_its_kind_is_dropped()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+		config.SeedString(
+			entry,
+			MigratedSensorSelection.UnitDefaultsKey,
+			"""{"Temperature":"Gigabytes","Data":"Gibibytes"}""");
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.UnitDefaults, Is.Not.Null);
+		Assert.That(restored.UnitDefaults![SensorType.Temperature], Is.EqualTo(SensorUnit.Celsius));
+		Assert.That(restored.UnitDefaults[SensorType.Data], Is.EqualTo(SensorUnit.Gibibytes));
+	}
+
+	[Test]
+	public async Task A_stored_default_this_version_does_not_offer_is_dropped()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var config = new FakeIntegrationConfig();
+		var entry = MigrationTestData.SeedMigratedSensors(config, CpuTotal);
+		config.SeedString(
+			entry,
+			MigratedSensorSelection.UnitDefaultsKey,
+			"""{"Humidity":"Celsius","Temperature":"Fahrenheit"}""");
+
+		var restored = await MigratedSensorSelection.ReadAsync(config, logger);
+
+		Assert.That(restored.UnitDefaults, Is.Not.Null);
+		Assert.That(restored.UnitDefaults![SensorType.Temperature], Is.EqualTo(SensorUnit.Fahrenheit));
+		Assert.That(restored.UnitDefaults.ContainsKey(SensorType.Humidity), Is.False);
+	}
+
+	[Test]
+	public void The_defaults_are_stored_as_text()
+	{
+		var values = new MigratedSensorSelection(
+			[CpuTotal],
+			null,
+			UnitDefaults: new Dictionary<SensorType, SensorUnit>
+			{
+				[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			}).ToValues();
+
+		Assert.That(values.ContainsKey(MigratedSensorSelection.UnitDefaultsKey), Is.True);
+		Assert.That(
+			values[MigratedSensorSelection.UnitDefaultsKey].GetString(),
+			Is.EqualTo("""{"Temperature":"Fahrenheit"}"""));
+	}
 }

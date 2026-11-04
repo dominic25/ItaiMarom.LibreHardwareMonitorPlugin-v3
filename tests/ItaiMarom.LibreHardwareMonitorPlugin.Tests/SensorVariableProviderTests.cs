@@ -431,6 +431,91 @@ public sealed class SensorVariableProviderTests
 	}
 
 	[Test]
+	public async Task A_declared_sensor_without_a_choice_is_served_in_its_kind_s_default_unit()
+	{
+		await using var fixture = new Fixture();
+		var sensor = fixture.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		fixture.Select(sensor);
+		fixture.Defaults(Fahrenheit());
+
+		fixture.Watch();
+		fixture.Start();
+		await WaitUntilAsync(() => fixture.Monitor.TryGetReading(sensor, out _));
+
+		var definition = fixture.Provider.Variables.Single();
+		Assert.That(definition.Unit, Is.EqualTo("°F"));
+		Assert.That(await fixture.Provider.ReadAsync(sensor.VariableId), Is.EqualTo(VariableReading.Of(122d)));
+	}
+
+	[Test]
+	public async Task Changing_a_default_reaches_a_declared_sensor_that_never_made_a_choice()
+	{
+		await using var fixture = new Fixture();
+		var sensor = fixture.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		fixture.Select(sensor);
+		fixture.Defaults(Fahrenheit());
+
+		Assert.That(fixture.Provider.Variables.Single().Unit, Is.EqualTo("°F"));
+
+		// The declaration is cached by selection; a changed default has to invalidate it, or a widget
+		// would keep showing the unit the previous default named.
+		fixture.Defaults(new Dictionary<SensorType, SensorUnit>
+		{
+			[SensorType.Temperature] = SensorUnit.Celsius,
+		});
+
+		Assert.That(fixture.Provider.Variables.Single().Unit, Is.EqualTo("°C"));
+	}
+
+	[Test]
+	public async Task A_sensor_s_own_choice_is_not_overridden_by_a_default()
+	{
+		await using var fixture = new Fixture();
+		var sensor = fixture.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f)
+			with { DisplayUnit = SensorUnit.Celsius };
+		fixture.Select(sensor);
+		fixture.Defaults(Fahrenheit());
+
+		Assert.That(fixture.Provider.Variables.Single().Unit, Is.EqualTo("°C"));
+	}
+
+	[Test]
+	public async Task A_catalog_sensor_is_offered_in_its_kind_s_default_unit()
+	{
+		await using var fixture = new Fixture();
+		fixture.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		fixture.Defaults(Fahrenheit());
+
+		var roots = await fixture.Provider.DiscoverAsync(new VariableCatalogQuery());
+		var cpu = roots.Items.Single();
+		var page = await fixture.Provider.DiscoverAsync(new VariableCatalogQuery { ParentId = cpu.Id });
+
+		// The catalog offers sensors that are not declared as variables, so the default has to reach
+		// them there too rather than only through the selection.
+		Assert.That(page.Items.Single().Unit, Is.EqualTo("°F"));
+	}
+
+	[Test]
+	public async Task A_catalog_sensor_bound_with_no_choice_reads_in_its_kind_s_default_unit()
+	{
+		await using var fixture = new Fixture();
+		var sensor = fixture.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		fixture.Defaults(Fahrenheit());
+
+		// Binding a catalog resource builds the table and subscribes to it, which is the ordinary path
+		// a restored binding takes.
+		await fixture.Provider.DiscoverAsync(new VariableCatalogQuery());
+		await fixture.Provider.SubscribeAsync([sensor.ResourceId]);
+		fixture.Start();
+		await WaitUntilAsync(() => fixture.Monitor.TryGetReading(sensor, out _));
+
+		var definition = await fixture.Provider.ResolveAsync(sensor.ResourceId);
+		Assert.That(definition, Is.Not.Null);
+		Assert.That(definition!.Unit, Is.EqualTo("°F"));
+		Assert.That(await fixture.Provider.ReadAsync(sensor.ResourceId), Is.EqualTo(VariableReading.Of(122d)));
+	}
+
+	[Test]
 	public async Task A_read_never_touches_the_hardware_library()
 	{
 		await using var fixture = new Fixture();
@@ -706,6 +791,12 @@ public sealed class SensorVariableProviderTests
 		Assert.That(page.ContinuationToken, Is.Null);
 	}
 
+	private static Dictionary<SensorType, SensorUnit> Fahrenheit() =>
+		new Dictionary<SensorType, SensorUnit>
+		{
+			[SensorType.Temperature] = SensorUnit.Fahrenheit,
+		};
+
 	private static async Task WaitUntilAsync(Func<bool> condition)
 	{
 		var deadline = DateTime.UtcNow + Patience;
@@ -803,6 +894,10 @@ public sealed class SensorVariableProviderTests
 		}
 
 		public void Select(params SensorIdentifier[] sensors) => Selection.Replace(sensors);
+
+		/// <summary>Sets the default display units, keeping the selection the way the settings window does.</summary>
+		public void Defaults(IReadOnlyDictionary<SensorType, SensorUnit> defaults) =>
+			Selection.Replace(Selection.Sensors, defaults);
 
 		/// <summary>Changes the loop's timing the way the settings screen does.</summary>
 		public void Polling(TimeSpan interval) =>

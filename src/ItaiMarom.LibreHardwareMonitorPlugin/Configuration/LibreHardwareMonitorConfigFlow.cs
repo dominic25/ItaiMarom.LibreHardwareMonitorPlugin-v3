@@ -1,6 +1,7 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
+using LibreHardwareMonitor.Hardware;
 using MacroDeck.Sdk.ConfigFlow;
 using Serilog;
 
@@ -149,7 +150,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 				values,
 				_autoElevate,
 				_remotes.Remotes,
-				SensorReadingSource.UnitsOf(_selection)));
+				SensorReadingSource.UnitsOf(_selection),
+				_selection.UnitDefaults));
 
 			_logger.Information(
 				"The classic sensor window was opened on {SensorCount} sensors at {WindowUri}.",
@@ -197,12 +199,19 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 			?? TimeSpan.FromMilliseconds(CurrentPollingMilliseconds());
 		var remotes = ResolveRemotes(payload.Remotes ?? []);
 
+		// A window this version serves always posts every kind, so an empty map is a form that predates
+		// defaults rather than a user who cleared them. Keeping what the plugin is running with is the
+		// safe answer; a complete map otherwise.
+		var defaults = payload.DefaultUnits is { Count: > 0 }
+			? SensorUnits.NormalizeDefaults(payload.DefaultUnits)
+			: _selection.UnitDefaults;
+
 		_logger.Information(
 			"The classic sensor window sent back {SensorCount} sensors and {RemoteCount} remote sources.",
 			sensors.Count,
 			remotes.Count);
 
-		return Complete(sensors, polling, payload.AutoElevate, remotes);
+		return Complete(sensors, polling, payload.AutoElevate, remotes, defaults);
 	}
 
 	/// <summary>What the screen ends in: the selection written as a configuration entry.</summary>
@@ -210,7 +219,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		IReadOnlyList<SensorIdentifier> sensors,
 		TimeSpan? polling,
 		bool autoElevate,
-		List<RemoteSourceDefinition> remotes)
+		List<RemoteSourceDefinition> remotes,
+		IReadOnlyDictionary<SensorType, SensorUnit> defaults)
 	{
 		_logger.Information(
 			"The sensor configuration was saved with {SensorCount} sensors and {RemoteCount} remote sources.",
@@ -221,7 +231,7 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		// box is unticked: from here on the plugin has a preference rather than an unset one.
 		return ConfigFlowResult.Complete(
 			EntryTitle,
-			new MigratedSensorSelection(sensors, polling, autoElevate, remotes).ToConfigurationValues());
+			new MigratedSensorSelection(sensors, polling, autoElevate, remotes, defaults).ToConfigurationValues());
 	}
 
 	/// <summary>
@@ -295,7 +305,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		{
 			return SensorReadingSource.ValuesOf(
 				await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false),
-				SensorReadingSource.UnitsOf(_selection));
+				SensorReadingSource.UnitsOf(_selection),
+				_selection.UnitDefaults);
 		}
 		catch (OperationCanceledException)
 		{

@@ -1,5 +1,6 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
+using LibreHardwareMonitor.Hardware;
 using MacroDeck.Plugin.Testing.Fakes;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
@@ -48,5 +49,17 @@ internal static class MigrationTestData
 			MigratedSensorSelection.RemoteSourcesKey,
 			new MigratedSensorSelection([], null, RemoteSources: remotes)
 				.ToValues()[MigratedSensorSelection.RemoteSourcesKey]
+				.GetString()!);
+
+	/// <summary>Records the default display units a configuration was saved with.</summary>
+	public static void SeedUnitDefaults(
+		FakeIntegrationConfig config,
+		Guid entry,
+		IReadOnlyDictionary<SensorType, SensorUnit> defaults) =>
+		config.SeedString(
+			entry,
+			MigratedSensorSelection.UnitDefaultsKey,
+			new MigratedSensorSelection([], null, UnitDefaults: defaults)
+				.ToValues()[MigratedSensorSelection.UnitDefaultsKey]
 				.GetString()!);
 }

@@ -287,8 +287,11 @@ public sealed class ClassicWindowServerTests
 		// back to a sensor without depending on the row order.
 		Assert.That(page, Does.Contain($"name=\"unit_sensor\" value=\"{CpuCore1.ResourceId}\""));
 		Assert.That(page, Does.Contain("name=\"unit_value\" aria-label=\"Unit for CPU Core #1_Temperature\""));
-		Assert.That(page, Does.Contain("<option value=\"Celsius\" selected>"));
-		Assert.That(page, Does.Contain("<option value=\"Fahrenheit\">"));
+
+		var selector = WindowClient.UnitSelectorOf(page, CpuCore1);
+		Assert.That(selector, Does.Contain("<option value=\"\" selected>Default"));
+		Assert.That(selector, Does.Contain("<option value=\"Celsius\">"));
+		Assert.That(selector, Does.Contain("<option value=\"Fahrenheit\">"));
 
 		// A load is a percentage and has no unit to choose, so its row posts no selector at all.
 		Assert.That(page, Does.Not.Contain($"name=\"unit_sensor\" value=\"{CpuTotal.ResourceId}\""));
@@ -306,9 +309,11 @@ public sealed class ClassicWindowServerTests
 		var page = await WindowClient.ReadPageAsync(OpenWithUnits(units, [CpuCore1], CpuCore1).PageUri);
 
 		// Pressing Save without touching the selector has to keep the unit, so what opens must already be
-		// the stored choice.
-		Assert.That(page, Does.Contain("<option value=\"Fahrenheit\" selected>"));
-		Assert.That(page, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+		// the stored choice - which also means the default option must not claim it.
+		var selector = WindowClient.UnitSelectorOf(page, CpuCore1);
+		Assert.That(selector, Does.Contain("<option value=\"Fahrenheit\" selected>"));
+		Assert.That(selector, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+		Assert.That(selector, Does.Not.Contain("<option value=\"\" selected>"));
 	}
 
 	[Test]
@@ -351,6 +356,125 @@ public sealed class ClassicWindowServerTests
 
 		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
 		Assert.That(payload!.Units, Is.Empty);
+	}
+
+	[Test]
+	public async Task A_sensor_left_on_default_posts_no_unit_of_its_own()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		await WindowClient.PostAsync(
+			opened.PageUri,
+			[
+				new KeyValuePair<string, string>("sensors", CpuCore1.ResourceId),
+				new KeyValuePair<string, string>("unit_sensor", CpuCore1.ResourceId),
+				new KeyValuePair<string, string>("unit_value", string.Empty),
+				new KeyValuePair<string, string>("save", "1"),
+			]);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+
+		// The empty option means "follow the default". Storing it as an explicit choice would freeze
+		// the default onto the sensor, and changing the default later would leave the sensor behind.
+		Assert.That(payload!.Units, Is.Empty);
+	}
+
+	[Test]
+	public async Task The_window_opens_its_defaults_editor_on_every_kind_it_offers()
+	{
+		var page = await WindowClient.ReadPageAsync(Open([CpuCore1], CpuCore1).PageUri);
+
+		Assert.That(page, Does.Contain("id=\"defaults\" open>"));
+		Assert.That(
+			Occurrences(page, "name=\"default_unit_kind\""),
+			Is.EqualTo(SensorUnits.SupportedKinds.Count));
+
+		foreach (var kind in SensorUnits.SupportedKinds)
+		{
+			Assert.That(page, Does.Contain($"name=\"default_unit_kind\" value=\"{kind}\""));
+		}
+	}
+
+	[Test]
+	public async Task The_defaults_editor_opens_on_the_configured_defaults()
+	{
+		var defaults = new Dictionary<SensorType, SensorUnit>
+		{
+			[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			[SensorType.Data] = SensorUnit.Gibibytes,
+		};
+
+		var page = await WindowClient.ReadPageAsync(OpenWithDefaults(defaults, [CpuCore1], CpuCore1).PageUri);
+
+		var temperature = WindowClient.DefaultSelectorOf(page, SensorType.Temperature);
+		Assert.That(temperature, Does.Contain("<option value=\"Fahrenheit\" selected>"));
+		Assert.That(temperature, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+
+		var data = WindowClient.DefaultSelectorOf(page, SensorType.Data);
+		Assert.That(data, Does.Contain("<option value=\"Gibibytes\" selected>"));
+		Assert.That(data, Does.Not.Contain("<option value=\"Gigabytes\" selected>"));
+	}
+
+	[Test]
+	public async Task A_sensor_left_on_default_says_which_unit_it_is_following()
+	{
+		var defaults = new Dictionary<SensorType, SensorUnit>
+		{
+			[SensorType.Temperature] = SensorUnit.Fahrenheit,
+		};
+
+		var page = await WindowClient.ReadPageAsync(OpenWithDefaults(defaults, [CpuCore1], CpuCore1).PageUri);
+
+		var selector = WindowClient.UnitSelectorOf(page, CpuCore1);
+		Assert.That(
+			selector,
+			Does.Contain($"<option value=\"\" selected>Default ({WebUtility.HtmlEncode("°F")})</option>"));
+		Assert.That(selector, Does.Not.Contain("<option value=\"Fahrenheit\" selected>"));
+		Assert.That(selector, Does.Not.Contain("<option value=\"Celsius\" selected>"));
+	}
+
+	[Test]
+	public async Task Saving_the_window_returns_the_defaults_it_was_given()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		await WindowClient.SaveAsync(
+			opened.PageUri,
+			[CpuCore1.ResourceId],
+			1000,
+			defaults:
+			[
+				(SensorType.Temperature, SensorUnit.Fahrenheit),
+				(SensorType.Data, SensorUnit.Gibibytes),
+			]);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.DefaultUnits, Has.Count.EqualTo(2));
+		Assert.That(payload.DefaultUnits![SensorType.Temperature], Is.EqualTo(SensorUnit.Fahrenheit));
+		Assert.That(payload.DefaultUnits[SensorType.Data], Is.EqualTo(SensorUnit.Gibibytes));
+	}
+
+	[Test]
+	public async Task A_posted_default_that_does_not_suit_its_kind_is_dropped()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		// A size is not a temperature; a stale or hand-edited form must not make every temperature
+		// convert as though it were bytes.
+		await WindowClient.PostAsync(
+			opened.PageUri,
+			[
+				new KeyValuePair<string, string>("sensors", CpuCore1.ResourceId),
+				new KeyValuePair<string, string>("default_unit_kind", nameof(SensorType.Temperature)),
+				new KeyValuePair<string, string>("default_unit_value", nameof(SensorUnit.Gigabytes)),
+				new KeyValuePair<string, string>("default_unit_kind", nameof(SensorType.Data)),
+				new KeyValuePair<string, string>("default_unit_value", nameof(SensorUnit.Gibibytes)),
+				new KeyValuePair<string, string>("save", "1"),
+			]);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.DefaultUnits, Has.Count.EqualTo(1));
+		Assert.That(payload.DefaultUnits![SensorType.Data], Is.EqualTo(SensorUnit.Gibibytes));
 	}
 
 	[Test]
@@ -577,6 +701,21 @@ public sealed class ClassicWindowServerTests
 			RedirectUri,
 			State,
 			RemoteSources: remotes));
+
+	private ClassicWindowServer.Opened OpenWithDefaults(
+		IReadOnlyDictionary<SensorType, SensorUnit> defaults,
+		IReadOnlyCollection<SensorIdentifier> reported,
+		params SensorIdentifier[] selected) =>
+		_server.Open(new ClassicWindowOpening(
+			"Libre Hardware Monitor",
+			SensorCategory.Build(reported),
+			selected.Select(sensor => sensor.ResourceId).ToArray(),
+			1000,
+			10,
+			10000,
+			RedirectUri,
+			State,
+			UnitDefaults: defaults));
 
 	private ClassicWindowServer.Opened OpenWithUnits(
 		IReadOnlyDictionary<string, SensorUnit> units,

@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using LibreHardwareMonitor.Hardware;
 using NUnit.Framework;
 
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
@@ -66,7 +67,8 @@ internal static class WindowClient
 		double? polling = null,
 		bool autoElevate = false,
 		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null,
-		IEnumerable<(string Sensor, SensorUnit Unit)>? units = null)
+		IEnumerable<(string Sensor, SensorUnit Unit)>? units = null,
+		IEnumerable<(SensorType Kind, SensorUnit Unit)>? defaults = null)
 	{
 		var fields = resourceIds
 			.Select(resourceId => new KeyValuePair<string, string>("sensors", resourceId))
@@ -103,6 +105,13 @@ internal static class WindowClient
 			fields.Add(new KeyValuePair<string, string>("unit_value", unit.ToString()));
 		}
 
+		foreach (var (kind, unit) in defaults ?? [])
+		{
+			// The defaults editor posts its kinds and units as two parallel lists too, in row order.
+			fields.Add(new KeyValuePair<string, string>("default_unit_kind", kind.ToString()));
+			fields.Add(new KeyValuePair<string, string>("default_unit_value", unit.ToString()));
+		}
+
 		return await PostAsync(windowUri, fields).ConfigureAwait(false);
 	}
 
@@ -118,6 +127,41 @@ internal static class WindowClient
 			.ConfigureAwait(false);
 
 		return response.StatusCode;
+	}
+
+	/// <summary>
+	/// One sensor's unit selector as the page rendered it. Assertions about which option is selected go
+	/// through this rather than the whole document, because the defaults editor renders selectors of its
+	/// own - a page-wide check would find its Celsius row and mistake it for the sensor's.
+	/// </summary>
+	public static string UnitSelectorOf(string page, SensorIdentifier sensor)
+	{
+		var marker = $"name=\"unit_value\" aria-label=\"Unit for {sensor.LegacyToken}\"";
+		var start = page.IndexOf(marker, StringComparison.Ordinal);
+
+		Assert.That(start, Is.GreaterThanOrEqualTo(0), $"{sensor.LegacyToken} has no unit selector.");
+
+		var end = page.IndexOf("</select>", start, StringComparison.Ordinal);
+		Assert.That(end, Is.GreaterThan(start), $"{sensor.LegacyToken}'s unit selector was not closed.");
+
+		return page[start..(end + "</select>".Length)];
+	}
+
+	/// <summary>
+	/// The defaults editor's selector for one kind, as the page rendered it. It is separate from a
+	/// sensor's selector: both offer the same units, and an assertion about one must not find the other.
+	/// </summary>
+	public static string DefaultSelectorOf(string page, SensorType kind)
+	{
+		var marker = $"id=\"default_{kind}\"";
+		var start = page.IndexOf(marker, StringComparison.Ordinal);
+
+		Assert.That(start, Is.GreaterThanOrEqualTo(0), $"{kind} has no default selector.");
+
+		var end = page.IndexOf("</select>", start, StringComparison.Ordinal);
+		Assert.That(end, Is.GreaterThan(start), $"{kind}'s default selector was not closed.");
+
+		return page[start..(end + "</select>".Length)];
 	}
 
 	/// <summary>Reads the key out of the address the callback was sent to, which is what a flow resumes on.</summary>

@@ -295,7 +295,7 @@ public sealed class LibreHardwareMonitorIntegration :
 			.ConfigureAwait(false);
 
 		var remotes = migrated.RemoteSources ?? [];
-		_selection.Replace(migrated.Sensors);
+		_selection.Replace(migrated.Sensors, migrated.UnitDefaults);
 		_remoteSelection.Replace(remotes);
 		_hardware.SetOptions(PollingOptions(migrated.PollingInterval));
 		_autoElevate = migrated.AutoElevate == true;

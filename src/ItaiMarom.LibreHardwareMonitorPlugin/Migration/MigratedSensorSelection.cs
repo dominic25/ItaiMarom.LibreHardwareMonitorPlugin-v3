@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using LibreHardwareMonitor.Hardware;
 using MacroDeck.Sdk.ConfigFlow;
 using Serilog;
 
@@ -38,7 +39,8 @@ public sealed record MigratedSensorSelection(
 	IReadOnlyList<SensorIdentifier> Sensors,
 	TimeSpan? PollingInterval,
 	bool? AutoElevate = null,
-	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null)
+	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null,
+	IReadOnlyDictionary<SensorType, SensorUnit>? UnitDefaults = null)
 {
 	/// <summary>The value the sensor list is stored under.</summary>
 	public const string SensorsKey = "sensors";
@@ -58,6 +60,14 @@ public sealed record MigratedSensorSelection(
 	/// remote monitoring existed carries.
 	/// </summary>
 	public const string RemoteSourcesKey = "remote_sources";
+
+	/// <summary>
+	/// The value the default display units are stored under, as the same kind of JSON string the sensor
+	/// list uses: a map from a sensor kind's name to the unit that kind defaults to. Absent means every
+	/// kind keeps the library's own unit, which is what a migration and every document written before
+	/// defaults existed carry.
+	/// </summary>
+	public const string UnitDefaultsKey = "unit_defaults";
 
 	/// <summary>Nothing migrated, or nothing that could be read back.</summary>
 	public static MigratedSensorSelection Empty { get; } = new([], null);
@@ -89,6 +99,25 @@ public sealed record MigratedSensorSelection(
 		{
 			values[AutoElevateKey] = JsonSerializer.SerializeToElement(
 				autoElevate ? "true" : "false",
+				SerializerOptions);
+		}
+
+		// A migration leaves this unset, because the old plugin had no unit defaults. The settings window
+		// always writes the complete map, including the built-in choices, so what the user saw is what the
+		// next start uses.
+		if (UnitDefaults is { } defaults)
+		{
+			var stored = new Dictionary<string, string>(StringComparer.Ordinal);
+			foreach (var pair in defaults)
+			{
+				if (SensorUnits.IsSupported(pair.Key) && SensorUnits.IsValidFor(pair.Key, pair.Value))
+				{
+					stored[pair.Key.ToString()] = pair.Value.ToString();
+				}
+			}
+
+			values[UnitDefaultsKey] = JsonSerializer.SerializeToElement(
+				JsonSerializer.Serialize(stored, SerializerOptions),
 				SerializerOptions);
 		}
 
@@ -151,6 +180,7 @@ public sealed record MigratedSensorSelection(
 		var remoteKeys = new HashSet<string>(StringComparer.Ordinal);
 		TimeSpan? pollingInterval = null;
 		bool? autoElevate = null;
+		IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults = null;
 
 		foreach (var entry in entries)
 		{
@@ -174,6 +204,14 @@ public sealed record MigratedSensorSelection(
 				autoElevate = preference;
 			}
 
+			if (unitDefaults is null
+				&& ReadUnitDefaults(
+					await ReadValueAsync(config, entry, UnitDefaultsKey, logger, cancellationToken).ConfigureAwait(false),
+					logger) is { } defaults)
+			{
+				unitDefaults = defaults;
+			}
+
 			ReadRemoteSources(
 				await ReadValueAsync(config, entry, RemoteSourcesKey, logger, cancellationToken).ConfigureAwait(false),
 				logger,
@@ -182,7 +220,7 @@ public sealed record MigratedSensorSelection(
 				remoteKeys);
 		}
 
-		return new MigratedSensorSelection(sensors, pollingInterval, autoElevate, remoteSources);
+		return new MigratedSensorSelection(sensors, pollingInterval, autoElevate, remoteSources, unitDefaults);
 	}
 
 	private static async Task<string?> ReadValueAsync(
@@ -255,6 +293,46 @@ public sealed record MigratedSensorSelection(
 
 	private static bool? ReadAutoElevate(string? stored) =>
 		bool.TryParse(stored, out var value) ? value : null;
+
+	/// <summary>
+	/// Reads one stored defaults map. A kind this version does not offer, or a unit that does not suit
+	/// the kind it is stored with, is dropped; the rest are normalized into a complete map, so a
+	/// partially edited document still leaves every kind with an answer.
+	/// </summary>
+	private static IReadOnlyDictionary<SensorType, SensorUnit>? ReadUnitDefaults(
+		string? stored,
+		ILogger logger)
+	{
+		if (stored is null)
+		{
+			return null;
+		}
+
+		try
+		{
+			var defaults = new Dictionary<SensorType, SensorUnit>();
+			foreach (var pair in JsonSerializer.Deserialize<Dictionary<string, string?>>(stored, SerializerOptions) ?? [])
+			{
+				if (!Enum.TryParse<SensorType>(pair.Key, ignoreCase: true, out var sensorType)
+					|| !SensorUnits.IsSupported(sensorType)
+					|| !SensorUnits.TryParse(pair.Value, out var unit)
+					|| !SensorUnits.IsValidFor(sensorType, unit))
+				{
+					logger.Debug("A stored default unit was dropped because it did not name a supported kind and unit.");
+					continue;
+				}
+
+				defaults[sensorType] = unit;
+			}
+
+			return defaults.Count > 0 ? SensorUnits.NormalizeDefaults(defaults) : null;
+		}
+		catch (JsonException exception)
+		{
+			logger.Warning(exception, "The stored default unit list could not be parsed.");
+			return null;
+		}
+	}
 
 	/// <summary>
 	/// Reads one stored remote list into the sets the whole configuration shares, so a remote the user

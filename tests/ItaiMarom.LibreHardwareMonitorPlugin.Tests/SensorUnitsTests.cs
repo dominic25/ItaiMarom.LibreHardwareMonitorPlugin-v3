@@ -29,6 +29,74 @@ public sealed class SensorUnitsTests
 	}
 
 	[Test]
+	public void A_configured_default_is_used_when_it_suits_the_kind()
+	{
+		var defaults = new Dictionary<SensorType, SensorUnit>
+		{
+			[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			[SensorType.Clock] = SensorUnit.Gigahertz,
+		};
+
+		Assert.That(SensorUnits.DefaultFor(SensorType.Temperature, defaults), Is.EqualTo(SensorUnit.Fahrenheit));
+		Assert.That(SensorUnits.DefaultFor(SensorType.Clock, defaults), Is.EqualTo(SensorUnit.Gigahertz));
+	}
+
+	[Test]
+	public void A_default_that_does_not_suit_its_kind_is_ignored()
+	{
+		var defaults = new Dictionary<SensorType, SensorUnit>
+		{
+			[SensorType.Temperature] = SensorUnit.Gigabytes,
+		};
+
+		// A hand-edited document can pair any kind with any unit. Converting every temperature as
+		// though it were a size is worse than falling back to the library's own unit.
+		Assert.That(SensorUnits.DefaultFor(SensorType.Temperature, defaults), Is.EqualTo(SensorUnit.Celsius));
+	}
+
+	[Test]
+	public void A_kind_missing_from_the_defaults_map_falls_back_to_the_library()
+	{
+		var defaults = new Dictionary<SensorType, SensorUnit>
+		{
+			[SensorType.Temperature] = SensorUnit.Fahrenheit,
+		};
+
+		Assert.That(SensorUnits.DefaultFor(SensorType.Data, defaults), Is.EqualTo(SensorUnit.Gigabytes));
+		Assert.That(SensorUnits.DefaultFor(SensorType.Temperature, (IReadOnlyDictionary<SensorType, SensorUnit>?)null), Is.EqualTo(SensorUnit.Celsius));
+	}
+
+	[Test]
+	public void Normalizing_a_partial_default_map_gives_every_kind_an_answer()
+	{
+		var normalized = SensorUnits.NormalizeDefaults(new Dictionary<SensorType, SensorUnit>
+		{
+			[SensorType.Temperature] = SensorUnit.Fahrenheit,
+			[SensorType.Throughput] = SensorUnit.KilobytesPerSecond,
+		});
+
+		Assert.That(normalized, Has.Count.EqualTo(SensorUnits.SupportedKinds.Count));
+		Assert.That(normalized[SensorType.Temperature], Is.EqualTo(SensorUnit.Fahrenheit));
+		Assert.That(normalized[SensorType.Throughput], Is.EqualTo(SensorUnit.KilobytesPerSecond));
+		Assert.That(normalized[SensorType.Data], Is.EqualTo(SensorUnit.Gigabytes));
+		Assert.That(normalized[SensorType.SmallData], Is.EqualTo(SensorUnit.Megabytes));
+		Assert.That(normalized[SensorType.Clock], Is.EqualTo(SensorUnit.Megahertz));
+	}
+
+	[Test]
+	public void The_supported_kinds_match_what_the_window_offers() =>
+		Assert.That(
+			SensorUnits.SupportedKinds,
+			Is.EqualTo(new[]
+			{
+				SensorType.Temperature,
+				SensorType.Data,
+				SensorType.SmallData,
+				SensorType.Clock,
+				SensorType.Throughput,
+			}));
+
+	[Test]
 	public void Only_a_unit_the_kind_can_be_shown_in_is_accepted()
 	{
 		Assert.That(SensorUnits.IsValidFor(SensorType.Temperature, SensorUnit.Fahrenheit), Is.True);
