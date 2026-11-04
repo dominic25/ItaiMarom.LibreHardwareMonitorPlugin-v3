@@ -67,7 +67,7 @@ internal static class WindowClient
 		double? polling = null,
 		bool autoElevate = false,
 		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null,
-		IEnumerable<(string Sensor, SensorUnit Unit)>? units = null,
+		IEnumerable<(string Sensor, SensorUnit? Unit)>? units = null,
 		IEnumerable<(SensorType Kind, SensorUnit Unit)>? defaults = null)
 	{
 		var fields = resourceIds
@@ -101,8 +101,9 @@ internal static class WindowClient
 		{
 			// Every unit selector carries its sensor's id in a hidden field beside it, so the two
 			// parallel lists the form posts stay aligned even where a kind offers no selector.
+			// A null unit means the user chose Default - post an empty value to clear any explicit choice.
 			fields.Add(new KeyValuePair<string, string>("unit_sensor", sensor));
-			fields.Add(new KeyValuePair<string, string>("unit_value", unit.ToString()));
+			fields.Add(new KeyValuePair<string, string>("unit_value", unit?.ToString() ?? string.Empty));
 		}
 
 		foreach (var (kind, unit) in defaults ?? [])

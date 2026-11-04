@@ -406,11 +406,12 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 	/// <summary>
 	/// Gives each resolved sensor the unit the window chose for it. A unit the sensor's kind cannot be
 	/// shown in - a stale form, or one edited by hand - is ignored rather than stored, because converting
-	/// a temperature as if it were a size would be worse than dropping the choice.
+	/// a temperature as if it were a size would be worse than dropping the choice. A <c>null</c> value
+	/// means the user explicitly chose <em>Default</em>, so any explicit unit the sensor had is cleared.
 	/// </summary>
 	private static IReadOnlyList<SensorIdentifier> ApplyUnits(
 		IReadOnlyList<SensorIdentifier> sensors,
-		IReadOnlyDictionary<string, SensorUnit>? units)
+		IReadOnlyDictionary<string, SensorUnit?>? units)
 	{
 		if (units is not { Count: > 0 })
 		{
@@ -420,10 +421,16 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		var chosen = new List<SensorIdentifier>(sensors.Count);
 		foreach (var sensor in sensors)
 		{
-			chosen.Add(
-				units.TryGetValue(sensor.ResourceId, out var unit) && SensorUnits.IsValidFor(sensor.SensorType, unit)
-					? sensor with { DisplayUnit = unit }
-					: sensor);
+			if (units.TryGetValue(sensor.ResourceId, out var unit))
+			{
+				chosen.Add(unit is SensorUnit u && SensorUnits.IsValidFor(sensor.SensorType, u)
+					? sensor with { DisplayUnit = u }
+					: sensor with { DisplayUnit = (SensorUnit?)null });
+			}
+			else
+			{
+				chosen.Add(sensor);
+			}
 		}
 
 		return chosen;

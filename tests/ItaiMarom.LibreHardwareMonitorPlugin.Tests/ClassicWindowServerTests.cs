@@ -359,7 +359,7 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
-	public async Task A_sensor_left_on_default_posts_no_unit_of_its_own()
+	public async Task A_sensor_left_on_default_posts_an_explicit_clear()
 	{
 		var opened = Open([CpuCore1], CpuCore1);
 
@@ -374,9 +374,11 @@ public sealed class ClassicWindowServerTests
 
 		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
 
-		// The empty option means "follow the default". Storing it as an explicit choice would freeze
-		// the default onto the sensor, and changing the default later would leave the sensor behind.
-		Assert.That(payload!.Units, Is.Empty);
+		// The empty option means "follow the default". The sensor is included with a null value so
+		// its explicit unit choice (if any) is cleared on save, rather than being left as-is.
+		Assert.That(payload!.Units, Is.Not.Null);
+		Assert.That(payload.Units!.Count, Is.EqualTo(1));
+		Assert.That(payload.Units[CpuCore1.ResourceId], Is.Null);
 	}
 
 	[Test]
@@ -640,6 +642,24 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task The_readings_reflect_per_sensor_unit_selectors_immediately()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+		_readings.Values = Values((CpuCore1, "50 °C"));
+
+		// The page sends per-sensor unit selectors with every refresh. When a sensor's selector is
+		// changed from an explicit unit back to Default (empty), the live value updates immediately.
+		var readings = await WindowClient.ReadValuesAsync(new Uri(
+			opened.PageUri,
+			$"/values?s={opened.Key}&unit_sensor={CpuCore1.ResourceId}&unit_value="));
+
+		Assert.That(_readings.LastUnitSelectors, Is.Not.Null);
+		Assert.That(_readings.LastUnitSelectors!.Count, Is.EqualTo(1));
+		Assert.That(_readings.LastUnitSelectors[CpuCore1.ResourceId], Is.Null);
+		Assert.That(readings[CpuCore1.ResourceId], Is.EqualTo("50 °C"));
+	}
+
+	[Test]
 	public async Task Setting_a_default_to_default_resets_it_to_the_library_unit()
 	{
 		var opened = Open([CpuCore1], CpuCore1);
@@ -807,11 +827,16 @@ public sealed class ClassicWindowServerTests
 		/// <summary>The defaults the last ask carried, so a test can see what the page was previewing.</summary>
 		public IReadOnlyDictionary<SensorType, SensorUnit>? LastDefaults { get; private set; }
 
+		/// <summary>The per-sensor units the last ask carried.</summary>
+		public IReadOnlyDictionary<string, SensorUnit?>? LastUnitSelectors { get; private set; }
+
 		public Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(
 			IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults,
+			IReadOnlyDictionary<string, SensorUnit?>? unitSelectors,
 			CancellationToken cancellationToken)
 		{
 			LastDefaults = unitDefaults;
+			LastUnitSelectors = unitSelectors;
 
 			return Failure is null
 				? Task.FromResult(Values)

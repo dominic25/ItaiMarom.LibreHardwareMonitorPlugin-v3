@@ -60,7 +60,12 @@ internal sealed record ClassicWindowPayload(
 	double? PollingMilliseconds,
 	bool AutoElevate,
 	IReadOnlyList<ClassicWindowRemote>? Remotes = null,
-	IReadOnlyDictionary<string, SensorUnit>? Units = null,
+	/// <summary>
+	/// The unit each configured sensor is shown in, keyed by resource id. A value of <c>null</c> means
+	/// the user explicitly chose <em>Default</em> for that sensor, so its explicit unit choice (if any)
+	/// should be cleared.
+	/// </summary>
+	IReadOnlyDictionary<string, SensorUnit?>? Units = null,
 	IReadOnlyDictionary<SensorType, SensorUnit>? DefaultUnits = null);
 
 /// <summary>
@@ -367,7 +372,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		if (IsReadingsRequest(request))
 		{
 			return key is not null && TryGetSession(key, out _)
-				? await ReadingsAsync(QueryDefaults(request.Target), cancellationToken).ConfigureAwait(false)
+				? await ReadingsAsync(QueryDefaults(request.Target), QueryUnits(request.Target), cancellationToken).ConfigureAwait(false)
 				: ClosedWindow();
 		}
 
@@ -412,12 +417,13 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	/// </remarks>
 	private async Task<HttpResponse> ReadingsAsync(
 		IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults,
+		IReadOnlyDictionary<string, SensorUnit?>? unitSelectors,
 		CancellationToken cancellationToken)
 	{
 		IReadOnlyDictionary<string, string?> readings;
 		try
 		{
-			readings = await _readings.ReadingsAsync(unitDefaults, cancellationToken).ConfigureAwait(false);
+			readings = await _readings.ReadingsAsync(unitDefaults, unitSelectors, cancellationToken).ConfigureAwait(false);
 		}
 		catch (OperationCanceledException)
 		{
@@ -550,19 +556,31 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	/// <remarks>
 	/// A value that is not a unit this version knows is ignored rather than stored: the sensor keeps the
 	/// library's own unit, which is the safe answer and costs only the user's choice until they pick again.
+	/// An <c>empty</c> value means the user chose <em>Default</em> for that sensor; the sensor is included
+	/// with a <c>null</c> value so its explicit unit choice (if any) is cleared on save.
 	/// </remarks>
-	private static Dictionary<string, SensorUnit> ReadUnits(Dictionary<string, List<string>> form)
+	private static Dictionary<string, SensorUnit?> ReadUnits(Dictionary<string, List<string>> form)
 	{
 		var sensors = ValuesOf(form, "unit_sensor");
 		var values = ValuesOf(form, "unit_value");
 		var count = Math.Min(sensors.Count, values.Count);
-		var units = new Dictionary<string, SensorUnit>(count, StringComparer.Ordinal);
+		var units = new Dictionary<string, SensorUnit?>(count, StringComparer.Ordinal);
 
 		for (var index = 0; index < count; index++)
 		{
 			var resourceId = sensors[index];
-			if (!string.IsNullOrWhiteSpace(resourceId)
-				&& SensorUnits.TryParse(values[index], out var unit))
+			if (string.IsNullOrWhiteSpace(resourceId))
+			{
+				continue;
+			}
+
+			var value = values[index];
+			if (string.IsNullOrWhiteSpace(value))
+			{
+				// User explicitly chose Default - clear any explicit unit this sensor had.
+				units[resourceId] = null;
+			}
+			else if (SensorUnits.TryParse(value, out var unit))
 			{
 				units[resourceId] = unit;
 			}
@@ -614,6 +632,50 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 		var defaults = ReadDefaultUnits(ParseForm(target[(question + 1)..]));
 		return defaults;
+	}
+
+	/// <summary>
+	/// The per-sensor unit selectors the page is currently showing, carried on the readings request. Uses
+	/// the same parallel lists the form posts. A value of <c>null</c> means the user chose <em>Default</em>
+	/// for that sensor. Sensors not in the map keep their saved selection (or default).
+	/// </summary>
+	private static Dictionary<string, SensorUnit?>? QueryUnits(string target)
+	{
+		var question = target.IndexOf('?');
+		if (question < 0)
+		{
+			return null;
+		}
+
+		var sensors = ValuesOf(ParseForm(target[(question + 1)..]), "unit_sensor");
+		var values = ValuesOf(ParseForm(target[(question + 1)..]), "unit_value");
+		var count = Math.Min(sensors.Count, values.Count);
+		if (count == 0)
+		{
+			return null;
+		}
+
+		var units = new Dictionary<string, SensorUnit?>(count, StringComparer.Ordinal);
+		for (var index = 0; index < count; index++)
+		{
+			var resourceId = sensors[index];
+			if (string.IsNullOrWhiteSpace(resourceId))
+			{
+				continue;
+			}
+
+			var value = values[index];
+			if (string.IsNullOrWhiteSpace(value))
+			{
+				units[resourceId] = null;
+			}
+			else if (SensorUnits.TryParse(value, out var unit))
+			{
+				units[resourceId] = unit;
+			}
+		}
+
+		return units.Count > 0 ? units : null;
 	}
 
 	private static List<string> ValuesOf(Dictionary<string, List<string>> form, string name) =>

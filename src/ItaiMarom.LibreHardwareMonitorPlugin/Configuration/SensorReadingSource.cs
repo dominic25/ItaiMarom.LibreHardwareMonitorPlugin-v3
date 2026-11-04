@@ -17,8 +17,14 @@ internal interface ISensorReadingSource
 	/// The defaults the page is currently showing, which can differ from the saved selection while the
 	/// user is still editing them; null to use the selection's.
 	/// </param>
+	/// <param name="unitSelectors">
+	/// The per-sensor unit selectors the page is currently showing. A sensor in this map with a
+	/// <c>null</c> value means the user chose <em>Default</em> for it, overriding any saved explicit unit.
+	/// Sensors not in the map use their saved selection (or default).
+	/// </param>
 	Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(
 		IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults,
+		IReadOnlyDictionary<string, SensorUnit?>? unitSelectors,
 		CancellationToken cancellationToken);
 }
 
@@ -44,6 +50,7 @@ internal sealed class SensorReadingSource : ISensorReadingSource
 	/// <inheritdoc />
 	public async Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(
 		IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults,
+		IReadOnlyDictionary<string, SensorUnit?>? unitSelectors,
 		CancellationToken cancellationToken)
 	{
 		// The window sends the defaults it is currently showing, so choosing one updates the value column
@@ -62,9 +69,39 @@ internal sealed class SensorReadingSource : ISensorReadingSource
 			defaults = merged;
 		}
 
+		// The window also sends per-sensor unit selectors. A sensor with a null value means the user
+		// chose Default for it, which clears any explicit unit the selection has for that sensor.
+		var units = UnitsOf(_selection);
+		if (unitSelectors is { Count: > 0 })
+		{
+			var merged = new Dictionary<string, SensorUnit>(StringComparer.Ordinal);
+			if (units is not null)
+			{
+				foreach (var pair in units)
+				{
+					merged[pair.Key] = pair.Value;
+				}
+			}
+
+			foreach (var pair in unitSelectors)
+			{
+				if (pair.Value is SensorUnit u)
+				{
+					merged[pair.Key] = u;
+				}
+				else
+				{
+					// User chose Default for this sensor - remove any explicit unit.
+					merged.Remove(pair.Key);
+				}
+			}
+
+			units = merged.Count > 0 ? merged : null;
+		}
+
 		return ValuesOf(
 			await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false),
-			UnitsOf(_selection),
+			units,
 			defaults);
 	}
 

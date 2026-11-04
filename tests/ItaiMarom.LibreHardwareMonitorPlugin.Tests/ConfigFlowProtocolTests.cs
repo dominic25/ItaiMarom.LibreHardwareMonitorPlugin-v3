@@ -479,6 +479,47 @@ public sealed class ConfigFlowProtocolTests
 	}
 
 	[Test]
+	public async Task A_sensor_changed_back_to_default_clears_its_explicit_unit()
+	{
+		var source = new FakeHardwareSensorSource()
+			.Add("CPU", "CPU Core #1", SensorType.Temperature, 50f);
+		var cpu = source.Sensors[0];
+
+		await using var harness = CreateHarness(source);
+		await harness.InitializeIntegrationsAsync();
+		await OpenAsync(harness, Session);
+
+		// First save: set the sensor explicitly to Fahrenheit
+		var result = await SaveWindowAsync(
+			harness,
+			Session,
+			[cpu.ResourceId],
+			1000,
+			units: [(cpu.ResourceId, SensorUnit.Fahrenheit)]);
+
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		Assert.That(restored.Sensors.Single().DisplayUnit, Is.EqualTo(SensorUnit.Fahrenheit));
+
+		// Reopen and change the sensor back to Default
+		await OpenAsync(harness, Session);
+
+		// Post with empty unit_value for this sensor (user chose Default)
+		result = await SaveWindowAsync(
+			harness,
+			Session,
+			[cpu.ResourceId],
+			1000,
+			units: [(cpu.ResourceId, (SensorUnit?)null)]);
+
+		restored = await RestoreAsync(result.GetProperty("values"), logger);
+
+		// The explicit unit should be cleared, so the sensor follows the default (Celsius)
+		Assert.That(restored.Sensors.Single().DisplayUnit, Is.Null);
+	}
+
+	[Test]
 	public async Task Saving_the_window_stores_the_default_units()
 	{
 		var source = new FakeHardwareSensorSource()
@@ -688,7 +729,7 @@ public sealed class ConfigFlowProtocolTests
 		double? polling = null,
 		bool autoElevate = false,
 		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null,
-		IEnumerable<(string Sensor, SensorUnit Unit)>? units = null,
+		IEnumerable<(string Sensor, SensorUnit? Unit)>? units = null,
 		IEnumerable<(SensorType Kind, SensorUnit Unit)>? defaults = null)
 	{
 		var window = await ContinueAsync(harness, sessionId);

@@ -424,10 +424,26 @@ internal static class ClassicWindowPage
 				return query;
 			}
 
+			// Per-sensor unit selectors also affect the value column. When a user changes one from an
+			// explicit unit back to Default, the live refresh should reflect the default immediately.
+			function unitsQuery() {
+				var query = "";
+				var unitSelects = tree.querySelectorAll('select[name="unit_value"]');
+				for (var i = 0; i < unitSelects.length; i++) {
+					var select = unitSelects[i];
+					var sensorId = select.previousElementSibling?.value; // hidden unit_sensor input
+					if (sensorId) {
+						query += "&unit_sensor=" + encodeURIComponent(sensorId);
+						query += "&unit_value=" + encodeURIComponent(select.value);
+					}
+				}
+				return query;
+			}
+
 			function refreshValues() {
 				if (document.hidden) return;
 
-				fetch(valuesUrl + defaultsQuery(), { cache: "no-store" })
+				fetch(valuesUrl + defaultsQuery() + unitsQuery(), { cache: "no-store" })
 					.then(function (response) { return response.ok ? response.json() : null; })
 					.then(function (values) {
 						if (!values) return;
