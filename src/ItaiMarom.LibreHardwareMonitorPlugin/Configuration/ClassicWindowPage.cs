@@ -443,10 +443,16 @@ internal static class ClassicWindowPage
 			function refreshValues() {
 				if (document.hidden) return;
 
-				fetch(valuesUrl + defaultsQuery() + unitsQuery(), { cache: "no-store" })
-					.then(function (response) { return response.ok ? response.json() : null; })
+				var url = valuesUrl + defaultsQuery() + unitsQuery();
+				// console.log("[LHM] Fetching:", url);
+				fetch(url, { cache: "no-store" })
+					.then(function (response) {
+						// console.log("[LHM] Response:", response.status, response.ok);
+						return response.ok ? response.json() : null;
+					})
 					.then(function (values) {
 						if (!values) return;
+						// console.log("[LHM] Values:", values);
 
 						for (var i = 0; i < cells.length; i++) {
 							var cell = cells[i];
@@ -458,9 +464,10 @@ internal static class ClassicWindowPage
 
 						if (updated) updated.textContent = "values updated " + new Date().toLocaleTimeString();
 					})
-					.catch(function () {
+					.catch(function (err) {
 						// Reading stopped - the plugin is closing, or this page is on its way out. The next
 						// tick asks again, and what is on screen is left as it was rather than blanked.
+						// console.log("[LHM] Fetch error:", err);
 						if (updated) updated.textContent = "live values unavailable";
 					});
 			}

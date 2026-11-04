@@ -398,7 +398,7 @@ public sealed class ClassicWindowServerTests
 
 		// Choosing a default has to reach the readings on screen, so the refresh carries the editor's
 		// current state rather than only the saved selection.
-		Assert.That(page, Does.Contain("fetch(valuesUrl + defaultsQuery()"));
+		Assert.That(page, Does.Contain("var url = valuesUrl + defaultsQuery() + unitsQuery()"));
 	}
 
 	[Test]
