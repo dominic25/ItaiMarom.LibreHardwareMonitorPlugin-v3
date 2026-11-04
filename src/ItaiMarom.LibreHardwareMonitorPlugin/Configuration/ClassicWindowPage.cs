@@ -441,6 +441,7 @@ internal static class ClassicWindowPage
 				body.append("url", url);
 				if (userInput?.value) body.append("username", userInput.value);
 				if (passInput?.value) body.append("password", passInput.value);
+				if (keyInput?.value) body.append("key", keyInput.value);
 
 				fetch(testUrl, { method: "POST", body: body, cache: "no-store" })
 					.then(function (response) { return response.json(); })

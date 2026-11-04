@@ -433,6 +433,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		var url = form.TryGetValue("url", out var urls) && urls.Count > 0 ? urls[0] : null;
 		var userName = form.TryGetValue("username", out var users) && users.Count > 0 ? users[0] : null;
 		var password = form.TryGetValue("password", out var passes) && passes.Count > 0 ? passes[0] : null;
+		var key = form.TryGetValue("key", out var keys) && keys.Count > 0 ? keys[0] : null;
 
 		if (string.IsNullOrWhiteSpace(url))
 		{
@@ -472,8 +473,8 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			{
 				var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
-				// Parse sensors from the response
-				var sensors = ParseRemoteSensors(content);
+				// Parse sensors from the response using the provided key (or a fallback)
+				var sensors = ParseRemoteSensors(content, key ?? "remote");
 
 				var sensorInfos = sensors.Select(s => new
 				{
@@ -517,12 +518,12 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	/// <summary>
 	/// Parses sensors from a remote /data.json response using the same logic as RemoteHardwareSource.
 	/// </summary>
-	private static IReadOnlyList<HardwareSensor> ParseRemoteSensors(string json)
+	private static IReadOnlyList<HardwareSensor> ParseRemoteSensors(string json, string key)
 	{
 		try
 		{
-			// We need a dummy RemoteSourceDefinition for parsing - the key doesn't matter for test purposes
-			var dummySource = new RemoteSourceDefinition("Test", "http://test", "test");
+			// Use the provided key for the remote source so sensor resource IDs are namespaced correctly
+			var dummySource = new RemoteSourceDefinition("Test", "http://test", key);
 			return RemoteSensorParser.Parse(json, dummySource);
 		}
 		catch
