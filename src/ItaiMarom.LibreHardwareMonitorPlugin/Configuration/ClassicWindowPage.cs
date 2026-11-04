@@ -140,7 +140,9 @@ internal static class ClassicWindowPage
 			display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 			gap: 8px 18px;
 		}
-		.default-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+		/* The label and its selector stay together; spreading them across the column would put the
+		   dropdown nearer the next kind's label than its own. */
+		.default-row { display: flex; align-items: center; gap: 8px; justify-content: flex-start; }
 		.default-row label { color: var(--dim); }
 		.default-row select {
 			padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px;
