@@ -478,6 +478,30 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task Each_remote_machine_is_a_top_level_branch_above_its_hardware()
+	{
+		var livingRoom = new RemoteSourceDefinition("Living Room", "living-room-pc:8085", "living_room");
+		var office = new RemoteSourceDefinition("Office PC", "office-pc:8085", "office_pc");
+		var local = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature);
+		var remoteCpu = TestSensor.Create("CPU", "CPU Core #1", SensorType.Temperature, remote: livingRoom);
+		var remoteGpu = TestSensor.Create("GPU", "GPU Core", SensorType.Temperature, remote: office);
+
+		var page = await WindowClient.ReadPageAsync(
+			OpenWithRemotes([livingRoom, office], [local, remoteCpu, remoteGpu], local).PageUri);
+
+		Assert.That(page, Does.Contain("<span class=\"name machine\">Living Room</span>"));
+		Assert.That(page, Does.Contain("<span class=\"name machine\">Office PC</span>"));
+
+		// The machine branch already names the PC, so the hardware under it is not qualified again.
+		Assert.That(page, Does.Not.Contain("Living Room · CPU"));
+		Assert.That(page, Does.Not.Contain("Office PC · GPU"));
+
+		// The local CPU and the living room's CPU are two branches, not one merged by name.
+		Assert.That(Occurrences(page, "<span class=\"name root\">CPU</span>"), Is.EqualTo(2));
+		Assert.That(Occurrences(page, "<span class=\"name root\">GPU</span>"), Is.EqualTo(1));
+	}
+
+	[Test]
 	public async Task A_selection_is_handed_over_once()
 	{
 		var opened = Open([CpuCore1], CpuCore1);
@@ -693,7 +717,7 @@ public sealed class ClassicWindowServerTests
 		params SensorIdentifier[] selected) =>
 		_server.Open(new ClassicWindowOpening(
 			"Libre Hardware Monitor",
-			SensorCategory.Build(reported),
+			SensorCategory.Build(reported, remotes),
 			selected.Select(sensor => sensor.ResourceId).ToArray(),
 			1000,
 			10,

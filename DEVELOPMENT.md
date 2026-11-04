@@ -79,7 +79,7 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     ClassicWindowServer.cs             the loopback server: the window's page, and the readings it asks for
     ClassicWindowPage.cs               the old dialog, rendered server-side with a live reading per sensor
     SensorReadingSource.cs             the window's value column: one full read of the machine per refresh
-    SensorCategory.cs                  the window's tree: hardware, reading kind, sensors
+    SensorCategory.cs                  the window's tree: machine, hardware, reading kind, sensors
   Issues/
     MissingReadingsIssueProvider.cs    the warning about readings the driver would answer with
   manifest.json                        plugin identity, icon, entrypoints
@@ -136,6 +136,10 @@ plus every configured remote one:
   entry as the sensors. `InitializeAsync` applies them through `IRemoteSourceController` before the loop
   starts, so a saved change takes effect without a restart. The window's sensor tree is built when it
   opens, so a machine added in one session becomes selectable the next time the window is opened.
+- **Each remote machine is one branch.** `SensorCategory` groups by `(Source, RootId, SensorType)`, so two
+  machines can both have a `CPU` without merging. `ClassicWindowPage` draws a `machine` branch per source
+  above that machine's hardware, and the parser's `Living Room · CPU` root name is stripped back to `CPU`
+  because the branch above it already says which PC it is.
 
 The parser walks the document rather than assuming a depth: the root and machine nodes are grouping nodes,
 hardware nodes carry `HardwareId`, sensors carry `SensorId` and `Type`, and the synthetic `/` id is not a
@@ -489,6 +493,8 @@ Step-by-step port from the Macro Deck 2 plugin:
       reading in the sensor window and stored with the sensor selection.
 - [x] Default display units per sensor kind - a defaults editor above the tree, stored under
       `unit_defaults`, which every sensor without a choice of its own follows.
+- [x] One tree branch per remote machine - each machine's hardware grouped under it rather than beside
+      local hardware, with the machine label not repeated on every device.
 
 ## Maybe
 

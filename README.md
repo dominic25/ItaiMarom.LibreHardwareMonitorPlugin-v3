@@ -47,10 +47,11 @@ without them.
 
 1. Open the plugin's settings in Macro Deck and press **Continue** under **Libre Hardware Monitor**. The
    sensor window opens in your browser.
-2. The window is the hardware tree: hardware, then reading kind, then sensor, with the value each sensor
-   reports right now. Tick the sensors you want to see in Macro Deck. A filter box and a count on each
-   branch are there for machines that report a few hundred sensors, and a dash means "nothing to report
-   right now" - a stopped fan, a drive that is not answering - never a zero.
+2. The window is the hardware tree: this machine's hardware, then reading kind, then sensor, with the
+   value each sensor reports right now. Each remote machine you add is its own top-level branch, with that
+   machine's hardware underneath it. Tick the sensors you want to see in Macro Deck. A filter box and a
+   count on each branch are there for machines that report a few hundred sensors, and a dash means
+   "nothing to report right now" - a stopped fan, a drive that is not answering - never a zero.
 3. Set the **polling rate** at the bottom of the window, in milliseconds.
 4. A **Default units** section above the tree sets the unit every sensor of a kind uses - °C or °F, GB or
    GiB, MB or MiB, MHz or GHz, and B/s, KB/s or MB/s - including the sensors the catalog offers. Where a
@@ -63,7 +64,8 @@ without them.
 6. To watch another PC as well, expand **Remote machines**, press **Add remote machine**, give it a name
    and its address, and leave the row in the list. `host:8085` and the full
    `http://host:8085/data.json` address both work. The other PC must be running LibreHardwareMonitor with
-   **Remote Web Server** enabled. Its sensors join the tree the next time you open this window.
+   **Remote Web Server** enabled. Its sensors join the tree as their own machine branch the next time you
+   open this window.
 7. Press **Save**.
 
 What you tick becomes variables as soon as the save reaches Macro Deck. Unticking everything is how the

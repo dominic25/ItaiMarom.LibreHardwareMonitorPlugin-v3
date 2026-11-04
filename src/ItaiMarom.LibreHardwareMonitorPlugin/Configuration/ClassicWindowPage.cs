@@ -578,48 +578,94 @@ internal static class ClassicWindowPage
 		var defaults = opening.UnitDefaults;
 		var builder = new StringBuilder();
 
-		foreach (var root in categories.GroupBy(category => category.RootName, StringComparer.Ordinal))
+		// This machine keeps the old dialog's shape: a root, its reading kinds, its sensors.
+		foreach (var root in categories
+			.Where(category => category.Source is null)
+			.GroupBy(category => category.RootName, StringComparer.Ordinal))
 		{
-			var rootSensors = root.SelectMany(category => category.Sensors).ToArray();
-			var rootTicked = rootSensors.Count(sensor => selected.Contains(sensor.ResourceId));
+			AppendHardwareRoot(builder, root.Key, root, selected, values, units, defaults);
+		}
+
+		// Each remote machine is one top-level branch, and its hardware sits underneath it rather than
+		// beside this machine's. The root the library names is still there - it is what a user opens to
+		// reach a processor's temperatures - but the machine is the container that keeps two PCs apart.
+		foreach (var machine in categories
+			.Where(category => category.Source is not null)
+			.GroupBy(category => category.Source!, StringComparer.Ordinal))
+		{
+			var machineSensors = machine.SelectMany(category => category.Sensors).ToArray();
+			var machineTicked = machineSensors.Count(sensor => selected.Contains(sensor.ResourceId));
 
 			AppendOpen(
 				builder,
-				"root",
-				root.Key,
-				rootTicked,
-				rootSensors.Length,
-				rootSensors.Any(sensor => sensor.Controllable));
+				"machine",
+				machine.First().MachineName ?? machine.Key,
+				machineTicked,
+				machineSensors.Length,
+				machineSensors.Any(sensor => sensor.Controllable));
 
-			foreach (var category in root)
+			foreach (var root in machine.GroupBy(category => category.RootName, StringComparer.Ordinal))
 			{
-				var kindTicked = category.Sensors.Count(sensor => selected.Contains(sensor.ResourceId));
-
-				AppendOpen(
-					builder,
-					"kind",
-					category.TypeName,
-					kindTicked,
-					category.Sensors.Count,
-					category.Sensors.Any(sensor => sensor.Controllable));
-
-				builder.Append("\t\t\t<ul>\n");
-				foreach (var sensor in category.Sensors)
-				{
-					var unit = units is not null && units.TryGetValue(sensor.ResourceId, out var chosen)
-						? chosen
-						: sensor.DisplayUnit;
-
-					AppendSensor(builder, sensor, selected.Contains(sensor.ResourceId), values, unit, defaults);
-				}
-
-				builder.Append("\t\t\t</ul>\n\t\t</details>\n");
+				AppendHardwareRoot(builder, root.Key, root, selected, values, units, defaults);
 			}
 
 			builder.Append("\t</details>\n");
 		}
 
 		return builder.ToString();
+	}
+
+	/// <summary>
+	/// One piece of hardware and the reading kinds under it. It is the same shape for this machine and for
+	/// a remote one; only what encloses it differs.
+	/// </summary>
+	private static void AppendHardwareRoot(
+		StringBuilder builder,
+		string name,
+		IEnumerable<SensorCategory> categories,
+		HashSet<string> selected,
+		IReadOnlyDictionary<string, string?> values,
+		IReadOnlyDictionary<string, SensorUnit>? units,
+		IReadOnlyDictionary<SensorType, SensorUnit>? defaults)
+	{
+		var root = categories.ToArray();
+		var rootSensors = root.SelectMany(category => category.Sensors).ToArray();
+		var rootTicked = rootSensors.Count(sensor => selected.Contains(sensor.ResourceId));
+
+		AppendOpen(
+			builder,
+			"root",
+			name,
+			rootTicked,
+			rootSensors.Length,
+			rootSensors.Any(sensor => sensor.Controllable));
+
+		foreach (var category in root)
+		{
+			var kindTicked = category.Sensors.Count(sensor => selected.Contains(sensor.ResourceId));
+
+			AppendOpen(
+				builder,
+				"kind",
+				category.TypeName,
+				kindTicked,
+				category.Sensors.Count,
+				category.Sensors.Any(sensor => sensor.Controllable));
+
+			builder.Append("\t\t\t<ul>\n");
+			foreach (var sensor in category.Sensors)
+			{
+				var unit = units is not null && units.TryGetValue(sensor.ResourceId, out var chosen)
+					? chosen
+					: sensor.DisplayUnit;
+
+				AppendSensor(builder, sensor, selected.Contains(sensor.ResourceId), values, unit, defaults);
+			}
+
+			builder.Append("\t\t\t</ul>\n\t\t</details>\n");
+		}
+
+		builder.Append("\t</details>\n");
 	}
 
 	/// <summary>

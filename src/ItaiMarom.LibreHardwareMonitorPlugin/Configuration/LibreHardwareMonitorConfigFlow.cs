@@ -139,7 +139,7 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 
 			var opened = _window.Open(new ClassicWindowOpening(
 				EntryTitle,
-				SensorCategory.Build(index.Reported),
+				SensorCategory.Build(index.Reported, _remotes.Remotes),
 				configured.Select(sensor => sensor.ResourceId).Distinct(StringComparer.Ordinal).ToArray(),
 				CurrentPollingMilliseconds(),
 				MinimumPollingMilliseconds,

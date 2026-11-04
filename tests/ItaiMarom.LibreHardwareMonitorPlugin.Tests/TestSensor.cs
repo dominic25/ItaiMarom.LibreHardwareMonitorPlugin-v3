@@ -15,16 +15,24 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
 internal static class TestSensor
 {
 	/// <summary>Builds a sensor on a root device, or on a sub-device when a name is given.</summary>
+	/// <param name="remote">
+	/// The remote machine the sensor came from, or null for this machine. A remote sensor's root name is
+	/// qualified the way the parser qualifies it, because that is what the window has to strip back off.
+	/// </param>
 	public static SensorIdentifier Create(
 		string hardwareName,
 		string sensorName,
 		SensorType sensorType,
-		string? subHardwareName = null)
+		string? subHardwareName = null,
+		RemoteSourceDefinition? remote = null)
 	{
-		var rootId = $"/test/{VariableNaming.ToDeclaredId(hardwareName)}";
+		var rootId = remote is null
+			? $"/test/{VariableNaming.ToDeclaredId(hardwareName)}"
+			: $"/remote/{remote.Key}/test/{VariableNaming.ToDeclaredId(hardwareName)}";
+		var rootName = remote?.Qualify(hardwareName) ?? hardwareName;
 		var hardware = subHardwareName is null
-			? HardwareLocation.Root(rootId, hardwareName)
-			: HardwareLocation.Root(rootId, hardwareName)
+			? HardwareLocation.Root(rootId, rootName, remote?.Key)
+			: HardwareLocation.Root(rootId, rootName, remote?.Key)
 				.Child($"{rootId}/{VariableNaming.ToDeclaredId(subHardwareName)}", subHardwareName);
 
 		var id = string.Join(
