@@ -393,6 +393,10 @@ public sealed class ClassicWindowServerTests
 		{
 			Assert.That(page, Does.Contain($"name=\"default_unit_kind\" value=\"{kind}\""));
 		}
+
+		// Choosing a default has to reach the readings on screen, so the refresh carries the editor's
+		// current state rather than only the saved selection.
+		Assert.That(page, Does.Contain("fetch(valuesUrl + defaultsQuery()"));
 	}
 
 	[Test]
@@ -619,6 +623,41 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task The_readings_are_taken_in_the_defaults_the_page_is_showing()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+		_readings.Values = Values((CpuCore1, "122 °F"));
+
+		// The page sends the defaults editor's current state with every refresh, so choosing a default
+		// updates the value column before the setting has been saved.
+		var readings = await WindowClient.ReadValuesAsync(new Uri(
+			opened.PageUri,
+			$"/values?s={opened.Key}&default_unit_kind=Temperature&default_unit_value=Fahrenheit"));
+
+		Assert.That(_readings.LastDefaults, Is.Not.Null);
+		Assert.That(_readings.LastDefaults![SensorType.Temperature], Is.EqualTo(SensorUnit.Fahrenheit));
+		Assert.That(readings[CpuCore1.ResourceId], Is.EqualTo("122 °F"));
+	}
+
+	[Test]
+	public async Task Setting_a_default_to_default_resets_it_to_the_library_unit()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+		_readings.Values = Values((CpuCore1, "50 °C"));
+
+		// The user changed Temperature back to Default (empty value). The page sends the empty value,
+		// and the server returns an empty map for that kind, so DefaultFor falls back to the library
+		// default (Celsius).
+		var readings = await WindowClient.ReadValuesAsync(new Uri(
+			opened.PageUri,
+			$"/values?s={opened.Key}&default_unit_kind=Temperature&default_unit_value="));
+
+		Assert.That(_readings.LastDefaults, Is.Not.Null);
+		Assert.That(_readings.LastDefaults!.ContainsKey(SensorType.Temperature), Is.False);
+		Assert.That(readings[CpuCore1.ResourceId], Is.EqualTo("50 °C"));
+	}
+
+	[Test]
 	public async Task Every_ask_for_the_readings_reads_the_machine_again()
 	{
 		var opened = Open([CpuCore1], CpuCore1);
@@ -765,8 +804,19 @@ public sealed class ClassicWindowServerTests
 		/// <summary>Thrown from the read, to stand in for a machine that will not answer.</summary>
 		public Exception? Failure { get; set; }
 
-		public Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(CancellationToken cancellationToken) =>
-			Failure is null ? Task.FromResult(Values) : Task.FromException<IReadOnlyDictionary<string, string?>>(Failure);
+		/// <summary>The defaults the last ask carried, so a test can see what the page was previewing.</summary>
+		public IReadOnlyDictionary<SensorType, SensorUnit>? LastDefaults { get; private set; }
+
+		public Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(
+			IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults,
+			CancellationToken cancellationToken)
+		{
+			LastDefaults = unitDefaults;
+
+			return Failure is null
+				? Task.FromResult(Values)
+				: Task.FromException<IReadOnlyDictionary<string, string?>>(Failure);
+		}
 	}
 
 	private static int Occurrences(string text, string value)

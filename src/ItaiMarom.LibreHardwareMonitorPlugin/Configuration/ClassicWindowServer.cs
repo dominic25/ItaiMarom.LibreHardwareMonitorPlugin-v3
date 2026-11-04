@@ -367,7 +367,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		if (IsReadingsRequest(request))
 		{
 			return key is not null && TryGetSession(key, out _)
-				? await ReadingsAsync(cancellationToken).ConfigureAwait(false)
+				? await ReadingsAsync(QueryDefaults(request.Target), cancellationToken).ConfigureAwait(false)
 				: ClosedWindow();
 		}
 
@@ -410,12 +410,14 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	/// hardware is allowed to be unreadable for a moment: a device being replaced is exactly the sort of
 	/// thing a user is in this window to notice.
 	/// </remarks>
-	private async Task<HttpResponse> ReadingsAsync(CancellationToken cancellationToken)
+	private async Task<HttpResponse> ReadingsAsync(
+		IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults,
+		CancellationToken cancellationToken)
 	{
 		IReadOnlyDictionary<string, string?> readings;
 		try
 		{
-			readings = await _readings.ReadingsAsync(cancellationToken).ConfigureAwait(false);
+			readings = await _readings.ReadingsAsync(unitDefaults, cancellationToken).ConfigureAwait(false);
 		}
 		catch (OperationCanceledException)
 		{
@@ -592,6 +594,25 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			}
 		}
 
+		return defaults;
+	}
+
+	/// <summary>
+	/// The defaults the page is currently showing, carried on the readings request. It uses the same two
+	/// parallel lists the form posts, so both paths read and validate them the same way. A request with no
+	/// query string keeps the selection's defaults (older page or hand-written request). A request with an
+	/// empty map means the user explicitly set every kind to <c>Default</c> and wants the library's own
+	/// units, so we return an empty map rather than null.
+	/// </summary>
+	private static Dictionary<SensorType, SensorUnit>? QueryDefaults(string target)
+	{
+		var question = target.IndexOf('?');
+		if (question < 0)
+		{
+			return null;
+		}
+
+		var defaults = ReadDefaultUnits(ParseForm(target[(question + 1)..]));
 		return defaults;
 	}
 

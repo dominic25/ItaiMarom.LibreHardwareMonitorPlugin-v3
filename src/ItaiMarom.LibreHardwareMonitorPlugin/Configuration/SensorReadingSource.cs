@@ -13,7 +13,13 @@ internal interface ISensorReadingSource
 	/// One reading per sensor on the machine, keyed by the resource id the window names it by, and null
 	/// for a sensor that has no reading right now.
 	/// </summary>
-	Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(CancellationToken cancellationToken);
+	/// <param name="unitDefaults">
+	/// The defaults the page is currently showing, which can differ from the saved selection while the
+	/// user is still editing them; null to use the selection's.
+	/// </param>
+	Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(
+		IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults,
+		CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -36,11 +42,31 @@ internal sealed class SensorReadingSource : ISensorReadingSource
 	}
 
 	/// <inheritdoc />
-	public async Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(CancellationToken cancellationToken) =>
-		ValuesOf(
+	public async Task<IReadOnlyDictionary<string, string?>> ReadingsAsync(
+		IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults,
+		CancellationToken cancellationToken)
+	{
+		// The window sends the defaults it is currently showing, so choosing one updates the value column
+		// before the setting has been saved. Merging over the selection means a page that knows only some
+		// kinds - an older one, or a hand-written request - leaves the rest as they were.
+		var defaults = _selection?.UnitDefaults;
+		if (unitDefaults is { Count: > 0 })
+		{
+			var merged = new Dictionary<SensorType, SensorUnit>(
+				defaults ?? SensorUnits.NormalizeDefaults(null));
+			foreach (var pair in unitDefaults)
+			{
+				merged[pair.Key] = pair.Value;
+			}
+
+			defaults = merged;
+		}
+
+		return ValuesOf(
 			await _hardware.SampleAsync(cancellationToken).ConfigureAwait(false),
 			UnitsOf(_selection),
-			_selection?.UnitDefaults);
+			defaults);
+	}
 
 	/// <summary>
 	/// Turns one read of a machine into the window's pairs. The first sensor under a resource id is the

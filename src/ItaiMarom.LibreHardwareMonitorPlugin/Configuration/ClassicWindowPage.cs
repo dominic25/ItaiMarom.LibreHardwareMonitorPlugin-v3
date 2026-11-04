@@ -368,7 +368,10 @@ internal static class ClassicWindowPage
 			}
 
 			for (var d = 0; d < defaultSelects.length; d++) {
-				defaultSelects[d].addEventListener("change", function () { syncDefaultLabels(this); });
+				defaultSelects[d].addEventListener("change", function () {
+					syncDefaultLabels(this);
+					if (typeof window.fetch === "function") refreshValues();
+				});
 			}
 
 			// Remote machines are rows of three fields each, so what the form posts is three parallel
@@ -410,10 +413,21 @@ internal static class ClassicWindowPage
 			var updated = document.getElementById("updated");
 			var valuesUrl = "__VALUES__";
 
+			// The readings are asked for in the defaults the editor is showing, not the ones the plugin
+			// saved, so choosing a default updates the value column immediately instead of after Save.
+			function defaultsQuery() {
+				var query = "";
+				for (var i = 0; i < defaultSelects.length; i++) {
+					query += "&default_unit_kind=" + encodeURIComponent(defaultSelects[i].getAttribute("data-default-kind"));
+					query += "&default_unit_value=" + encodeURIComponent(defaultSelects[i].value);
+				}
+				return query;
+			}
+
 			function refreshValues() {
 				if (document.hidden) return;
 
-				fetch(valuesUrl, { cache: "no-store" })
+				fetch(valuesUrl + defaultsQuery(), { cache: "no-store" })
 					.then(function (response) { return response.ok ? response.json() : null; })
 					.then(function (values) {
 						if (!values) return;
