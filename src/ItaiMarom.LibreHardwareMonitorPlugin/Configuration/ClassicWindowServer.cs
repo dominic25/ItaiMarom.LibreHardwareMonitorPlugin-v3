@@ -476,7 +476,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 				// Parse sensors from the response using the provided key (or a fallback)
 				// Never allow "test" as a key - it's reserved for internal test dummy sources
 				var effectiveKey = key;
-				if (string.IsNullOrWhiteSpace(effectiveKey) || string.Equals(effectiveKey, "test", StringComparison.OrdinalIgnoreCase))
+				if (string.IsNullOrWhiteSpace(effectiveKey) || string.Equals(effectiveKey, "test", StringComparison.OrdinalIgnoreCase) || effectiveKey.StartsWith("test_", StringComparison.OrdinalIgnoreCase))
 				{
 					effectiveKey = "remote";
 				}
@@ -925,3 +925,4 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		return stream.WriteAsync(packet, cancellationToken).AsTask();
 	}
 }
+

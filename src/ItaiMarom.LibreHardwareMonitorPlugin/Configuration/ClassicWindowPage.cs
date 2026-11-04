@@ -431,9 +431,9 @@ internal static class ClassicWindowPage
 					return;
 				}
 
-				// Generate a key from the URL if the key input is empty (for new rows not yet saved)
+				// Generate a key from the URL if the key input is empty or is "test"/"test_*"
 				var key = keyInput?.value?.trim();
-				if (!key) {
+				if (!key || key === "test" || key.startsWith("test_")) {
 					key = generateKeyFromUrl(url);
 					if (keyInput) keyInput.value = key;
 				}
@@ -1082,3 +1082,6 @@ internal static class ClassicWindowPage
 	private static string Milliseconds(double value) =>
 		Math.Round(value, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture);
 }
+
+
+
