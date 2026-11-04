@@ -425,7 +425,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 	/// <summary>
 	/// Tests a remote connection by making a request to the provided URL with optional credentials.
-	/// Returns a JSON response indicating success or failure.
+	/// Returns a JSON response indicating success or failure, and on success includes the sensor list.
 	/// </summary>
 	private async Task<HttpResponse> TestRemoteAsync(HttpRequest request, CancellationToken cancellationToken)
 	{
@@ -470,9 +470,29 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 			if (response.IsSuccessStatusCode)
 			{
-				// Try to read a bit of the response to verify it's valid JSON
 				var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-				return JsonResponse(new { ok = true, message = "Connected successfully" });
+
+				// Parse sensors from the response
+				var sensors = ParseRemoteSensors(content);
+
+				var sensorInfos = sensors.Select(s => new
+				{
+					resourceId = s.Sensor.ResourceId,
+					name = s.Sensor.SensorName,
+					type = s.Sensor.SensorType.ToString(),
+					hardware = s.Sensor.Hardware.RootName,
+					hardwarePath = s.Sensor.Hardware.Path,
+					value = s.Value?.ToString("F1", CultureInfo.InvariantCulture),
+					controllable = s.Sensor.Controllable
+				}).ToArray();
+
+				return JsonResponse(new
+				{
+					ok = true,
+					message = "Connected successfully",
+					sensors = sensorInfos,
+					sensorCount = sensorInfos.Length
+				});
 			}
 			else
 			{
@@ -491,6 +511,23 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		{
 			_logger.Warning(ex, "Test remote connection failed unexpectedly");
 			return JsonResponse(new { ok = false, message = "Unexpected error: " + ex.Message });
+		}
+	}
+
+	/// <summary>
+	/// Parses sensors from a remote /data.json response using the same logic as RemoteHardwareSource.
+	/// </summary>
+	private static IReadOnlyList<HardwareSensor> ParseRemoteSensors(string json)
+	{
+		try
+		{
+			// We need a dummy RemoteSourceDefinition for parsing - the key doesn't matter for test purposes
+			var dummySource = new RemoteSourceDefinition("Test", "http://test", "test");
+			return RemoteSensorParser.Parse(json, dummySource);
+		}
+		catch
+		{
+			return Array.Empty<HardwareSensor>();
 		}
 	}
 

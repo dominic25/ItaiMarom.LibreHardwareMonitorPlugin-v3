@@ -421,6 +421,8 @@ internal static class ClassicWindowPage
 				var urlInput = row.querySelector('input[name="remote_url"]');
 				var userInput = row.querySelector('input[name="remote_username"]');
 				var passInput = row.querySelector('input[name="remote_password"]');
+				var keyInput = row.querySelector('input[name="remote_key"]');
+				var nameInput = row.querySelector('input[name="remote_name"]');
 				var resultSpan = row.querySelector(".test-result");
 
 				var url = urlInput?.value?.trim();
@@ -433,7 +435,8 @@ internal static class ClassicWindowPage
 				button.textContent = "Testing…";
 				showTestResult(resultSpan, "Connecting…", null);
 
-				var testUrl = "/test-remote?s=" + encodeURIComponent(window.location.search.slice(1).split("s=")[1]?.split("&")[0] || "");
+				var sessionKey = window.location.search.slice(1).split("s=")[1]?.split("&")[0] || "";
+				var testUrl = "/test-remote?s=" + encodeURIComponent(sessionKey);
 				var body = new URLSearchParams();
 				body.append("url", url);
 				if (userInput?.value) body.append("username", userInput.value);
@@ -442,7 +445,17 @@ internal static class ClassicWindowPage
 				fetch(testUrl, { method: "POST", body: body, cache: "no-store" })
 					.then(function (response) { return response.json(); })
 					.then(function (data) {
-						showTestResult(resultSpan, data.message || (data.ok ? "Connected" : "Failed"), data.ok);
+						if (data.ok && data.sensors && data.sensors.length > 0) {
+							// Add sensors to the tree
+							addRemoteSensorsToTree(
+								keyInput?.value || "remote",
+								nameInput?.value || url,
+								data.sensors
+							);
+							showTestResult(resultSpan, "Connected - " + data.sensorCount + " sensors added", true);
+						} else {
+							showTestResult(resultSpan, data.message || (data.ok ? "Connected" : "Failed"), data.ok);
+						}
 					})
 					.catch(function (err) {
 						showTestResult(resultSpan, "Error: " + err.message, false);
@@ -457,6 +470,120 @@ internal static class ClassicWindowPage
 				if (!span) return;
 				span.textContent = message;
 				span.className = "test-result" + (ok === true ? " success" : ok === false ? " error" : "");
+			}
+
+			// Add remote sensors to the sensor tree
+			function addRemoteSensorsToTree(remoteKey, remoteName, sensors) {
+				// Check if this remote already has a branch in the tree
+				var existingBranch = tree.querySelector('[data-remote-key="' + remoteKey + '"]');
+				if (existingBranch) {
+					// Remove existing sensors for this remote
+					existingBranch.remove();
+				}
+
+				// Group sensors by hardware path, then by type
+				var byHardware = {};
+				for (var i = 0; i < sensors.length; i++) {
+					var s = sensors[i];
+					var hwPath = s.hardwarePath || s.hardware;
+					if (!byHardware[hwPath]) {
+						byHardware[hwPath] = { name: s.hardware, path: hwPath, kinds: {} };
+					}
+					if (!byHardware[hwPath].kinds[s.type]) {
+						byHardware[hwPath].kinds[s.type] = [];
+					}
+					byHardware[hwPath].kinds[s.type].push(s);
+				}
+
+				// Build the HTML for the remote machine branch
+				var html = '<details data-remote-key="' + remoteKey + '" open>' +
+					'<summary><input type="checkbox"><span class="name machine">' + escapeHtml(remoteName) + '</span>' +
+					'<span class="count">0/' + sensors.length + '</span></summary>';
+
+				for (var hwPath in byHardware) {
+					if (!byHardware.hasOwnProperty(hwPath)) continue;
+					var hw = byHardware[hwPath];
+					var hwSensorCount = 0;
+					for (var kind in hw.kinds) hwSensorCount += hw.kinds[kind].length;
+
+					html += '<details><summary><input type="checkbox"><span class="name ' + 'root">' + escapeHtml(hw.name) + '</span>';
+					if (hwSensorCount > 0) html += '<span class="cont' + 'ains" title="A sensor below can be driven by the built-in Slider widget.">control below</span>';
+					html += '<span class="count">0/' + hwSensorCount + '</span></summary>';
+
+					for (var kind in hw.kinds) {
+						if (!hw.kinds.hasOwnProperty(kind)) continue;
+						var kindSensors = hw.kinds[kind];
+						html += '<details><summary><input type="checkbox"><span class="name kind">' + escapeHtml(kind) + '</span>';
+						html += '<span class="count">0/' + kindSensors.length + '</span></summary>';
+						html += '<ul>';
+
+						for (var j = 0; j < kindSensors.length; j++) {
+							var s = kindSensors[j];
+							var valueDisplay = s.value ? escapeHtml(s.value) : "&mdash;";
+							var valueClass = s.value ? "value" : "value none";
+							var controllableBadge = s.controllable ?
+								'<span class="writ' + 'able" title="This sensor has a software control and can be driven by the built-in Slider widget.">controllable</span>' : '';
+							html += '<li><label><input type="checkbox" name="sensors" value="' + escapeHtml(s.resourceId) + '">' +
+								'<span>' + escapeHtml(s.name + '_' + s.type) + '</span>' +
+								controllableBadge +
+								'<span class="' + valueClass + '" data-value="' + escapeHtml(s.resourceId) + '">' + valueDisplay + '</span>' +
+								'</label></li>';
+						}
+
+						html += '</ul></details>';
+					}
+
+					html += '</details>';
+				}
+
+				html += '</details>';
+
+				// Insert before the closing </div> of .tree
+				tree.insertAdjacentHTML('beforeend', html);
+
+				// Re-initialize groups and boxes for the new elements
+				initializeTreeElements();
+			}
+
+			function escapeHtml(text) {
+				var div = document.createElement('div');
+				div.textContent = text;
+				return div.innerHTML;
+			}
+
+			// Re-initialize tree elements (groups, boxes, event listeners) after adding remote sensors
+			function initializeTreeElements() {
+				boxes = [].slice.call(tree.querySelectorAll('input[name="sensors"]'));
+				groups = [].slice.call(tree.querySelectorAll("details")).map(function (details) {
+					return {
+						details: details,
+						box: details.querySelector("summary input"),
+						sensors: [].slice.call(details.querySelectorAll('input[name="sensors"]')),
+					};
+				});
+
+				// Re-attach event listeners for new group checkboxes
+				for (var g = 0; g < groups.length; g++) {
+					var group = groups[g];
+					if (group.box && !group.box.dataset.listenerAttached) {
+						group.box.dataset.listenerAttached = "true";
+						group.box.addEventListener("click", function (event) { event.stopPropagation(); });
+						group.box.addEventListener("change", function () {
+							for (var i = 0; i < group.sensors.length; i++) {
+								group.sensors[i].checked = group.box.checked;
+							}
+							syncAll();
+						});
+					}
+					for (var i = 0; i < group.sensors.length; i++) {
+						if (!group.sensors[i].dataset.listenerAttached) {
+							group.sensors[i].dataset.listenerAttached = "true";
+							group.sensors[i].addEventListener("change", syncAll);
+						}
+					}
+				}
+
+				syncAll();
 			}
 
 			// The readings are asked for once a second and written into the cell of the sensor they belong
