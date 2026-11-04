@@ -14,8 +14,13 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 /// The label is what the settings tree and the catalog show. The key is what variable names and sensor
 /// identities are built from, because a label is free text and an identity has to be stable and legal.
 /// </para>
+/// <para>
+/// Optional HTTP Basic Auth credentials for the remote server. When provided, every request includes
+/// an <c>Authorization: Basic</c> header. The password is stored in the plugin configuration and is
+/// transmitted only to the configured remote address over HTTPS (or HTTP on a trusted LAN).
+/// </para>
 /// </remarks>
-public sealed record RemoteSourceDefinition(string Name, string Url, string Key)
+public sealed record RemoteSourceDefinition(string Name, string Url, string Key, string? UserName = null, string? Password = null)
 {
 	/// <summary>What separates a remote label from the hardware name it qualifies.</summary>
 	public const string NameSeparator = " · ";
@@ -36,7 +41,9 @@ public sealed record RemoteSourceDefinition(string Name, string Url, string Key)
 		string? key,
 		ISet<string>? usedKeys,
 		ISet<string>? usedUrls,
-		out RemoteSourceDefinition? definition)
+		out RemoteSourceDefinition? definition,
+		string? userName = null,
+		string? password = null)
 	{
 		definition = null;
 
@@ -65,7 +72,7 @@ public sealed record RemoteSourceDefinition(string Name, string Url, string Key)
 			stem = "remote";
 		}
 
-		definition = new RemoteSourceDefinition(label, normalizedUrl, UniqueKey(stem, usedKeys));
+		definition = new RemoteSourceDefinition(label, normalizedUrl, UniqueKey(stem, usedKeys), userName, password);
 		return true;
 	}
 

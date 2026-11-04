@@ -251,15 +251,15 @@ public sealed class ClassicWindowServerTests
 			1000,
 			remotes:
 			[
-				("Living Room", "http://living-room-pc:8085/data.json", "living_room"),
-				("Office PC", "office-pc:8085", "office_pc"),
+				("Living Room", "http://living-room-pc:8085/data.json", "living_room", null, null),
+				("Office PC", "office-pc:8085", "office_pc", null, null),
 			]);
 
 		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
 		Assert.That(payload!.Remotes, Is.EqualTo(new[]
 		{
-			new ClassicWindowRemote("Living Room", "http://living-room-pc:8085/data.json", "living_room"),
-			new ClassicWindowRemote("Office PC", "office-pc:8085", "office_pc"),
+			new ClassicWindowRemote("Living Room", "http://living-room-pc:8085/data.json", "living_room", "", ""),
+			new ClassicWindowRemote("Office PC", "office-pc:8085", "office_pc", "", ""),
 		}));
 	}
 
@@ -272,7 +272,7 @@ public sealed class ClassicWindowServerTests
 			opened.PageUri,
 			[CpuCore1.ResourceId],
 			1000,
-			remotes: [("", "", ""), ("Living Room", "living-room-pc:8085", "")]);
+			remotes: [("", "", "", null, null), ("Living Room", "living-room-pc:8085", "", null, null)]);
 
 		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
 		Assert.That(payload!.Remotes, Has.Count.EqualTo(1));

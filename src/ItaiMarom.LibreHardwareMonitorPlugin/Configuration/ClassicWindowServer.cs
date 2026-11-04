@@ -52,7 +52,7 @@ internal sealed record ClassicWindowOpening(
 	IReadOnlyDictionary<SensorType, SensorUnit>? UnitDefaults = null);
 
 /// <summary>One remote machine as the window's form carried it back, before it is validated.</summary>
-internal sealed record ClassicWindowRemote(string? Name, string? Url, string? Key);
+internal sealed record ClassicWindowRemote(string? Name, string? Url, string? Key, string? UserName = null, string? Password = null);
 
 /// <summary>What the classic sensor window sent back when the user pressed Save.</summary>
 internal sealed record ClassicWindowPayload(
@@ -532,9 +532,11 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	{
 		var names = ValuesOf(form, "remote_name");
 		var urls = ValuesOf(form, "remote_url");
+		var usernames = ValuesOf(form, "remote_username");
+		var passwords = ValuesOf(form, "remote_password");
 		var keys = ValuesOf(form, "remote_key");
 
-		var count = Math.Max(names.Count, Math.Max(urls.Count, keys.Count));
+		var count = Math.Max(names.Count, Math.Max(urls.Count, Math.Max(usernames.Count, Math.Max(passwords.Count, keys.Count))));
 		var remotes = new List<ClassicWindowRemote>(count);
 
 		for (var index = 0; index < count; index++)
@@ -545,7 +547,12 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 				continue;
 			}
 
-			remotes.Add(new ClassicWindowRemote(At(names, index), url, At(keys, index)));
+			remotes.Add(new ClassicWindowRemote(
+				At(names, index),
+				url,
+				At(keys, index),
+				At(usernames, index),
+				At(passwords, index)));
 		}
 
 		return remotes;

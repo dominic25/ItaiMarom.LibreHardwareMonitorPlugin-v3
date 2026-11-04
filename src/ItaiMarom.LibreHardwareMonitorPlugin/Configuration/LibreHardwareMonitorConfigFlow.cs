@@ -255,7 +255,9 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 				row.Key,
 				usedKeys,
 				usedUrls,
-				out var definition))
+				out var definition,
+				row.UserName,
+				row.Password))
 			{
 				definitions.Add(definition!);
 			}

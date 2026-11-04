@@ -125,8 +125,9 @@ public sealed record MigratedSensorSelection(
 		// always writes the list, including an empty one, which is how removing the last remote is stored.
 		if (RemoteSources is { } remotes)
 		{
+			var storedRemotes = remotes.Select(r => new StoredRemoteSource(r.Name, r.Url, r.Key, r.UserName, r.Password)).ToArray();
 			values[RemoteSourcesKey] = JsonSerializer.SerializeToElement(
-				JsonSerializer.Serialize(remotes.ToArray(), SerializerOptions),
+				JsonSerializer.Serialize(storedRemotes, SerializerOptions),
 				SerializerOptions);
 		}
 
@@ -365,7 +366,9 @@ public sealed record MigratedSensorSelection(
 					record.Key,
 					usedKeys,
 					usedUrls,
-					out var definition))
+					out var definition,
+					record.UserName,
+					record.Password))
 				{
 					remotes.Add(definition!);
 				}
@@ -382,5 +385,5 @@ public sealed record MigratedSensorSelection(
 	}
 
 	/// <summary>The shape a remote source was written in. Nullable because it is read from older text.</summary>
-	private sealed record StoredRemoteSource(string? Name, string? Url, string? Key);
+	private sealed record StoredRemoteSource(string? Name, string? Url, string? Key, string? UserName = null, string? Password = null);
 }

@@ -66,7 +66,7 @@ internal static class WindowClient
 		IEnumerable<string> resourceIds,
 		double? polling = null,
 		bool autoElevate = false,
-		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null,
+		IEnumerable<(string? Name, string? Url, string? Key, string? UserName, string? Password)>? remotes = null,
 		IEnumerable<(string Sensor, SensorUnit? Unit)>? units = null,
 		IEnumerable<(SensorType Kind, SensorUnit Unit)>? defaults = null)
 	{
@@ -89,11 +89,13 @@ internal static class WindowClient
 			fields.Add(new KeyValuePair<string, string>("auto_elevate", "1"));
 		}
 
-		foreach (var (name, url, key) in remotes ?? [])
+		foreach (var (name, url, key, userName, password) in remotes ?? [])
 		{
-			// The editor posts three parallel lists, in row order, which is what the form does.
+			// The editor posts five parallel lists, in row order, which is what the form does.
 			fields.Add(new KeyValuePair<string, string>("remote_name", name ?? string.Empty));
 			fields.Add(new KeyValuePair<string, string>("remote_url", url ?? string.Empty));
+			fields.Add(new KeyValuePair<string, string>("remote_username", userName ?? string.Empty));
+			fields.Add(new KeyValuePair<string, string>("remote_password", password ?? string.Empty));
 			fields.Add(new KeyValuePair<string, string>("remote_key", key ?? string.Empty));
 		}
 

@@ -295,7 +295,7 @@ public sealed class ConfigFlowProtocolTests
 			Session,
 			[cpu.ResourceId],
 			1000,
-			remotes: [("Living Room", "living-room-pc:8085", "")]);
+			remotes: [("Living Room", "living-room-pc:8085", "", null, null)]);
 
 		using var logger = new LoggerConfiguration().CreateLogger();
 		var restored = await RestoreAsync(result.GetProperty("values"), logger);
@@ -349,7 +349,7 @@ public sealed class ConfigFlowProtocolTests
 			Session,
 			[],
 			1000,
-			remotes: [("The Living Room", "http://living-room-pc:8085/data.json", "living_room")]);
+			remotes: [("The Living Room", "http://living-room-pc:8085/data.json", "living_room", null, null)]);
 
 		using var logger = new LoggerConfiguration().CreateLogger();
 		var restored = await RestoreAsync(result.GetProperty("values"), logger);
@@ -372,9 +372,9 @@ public sealed class ConfigFlowProtocolTests
 			1000,
 			remotes:
 			[
-				("Bad", "file:///C:/sensors.json", ""),
-				("Living Room", "living-room-pc:8085", ""),
-				("Duplicate", "http://living-room-pc:8085/data.json", ""),
+				("Bad", "file:///C:/sensors.json", "", null, null),
+				("Living Room", "living-room-pc:8085", "", null, null),
+				("Duplicate", "http://living-room-pc:8085/data.json", "", null, null),
 			]);
 
 		using var logger = new LoggerConfiguration().CreateLogger();
@@ -728,7 +728,7 @@ public sealed class ConfigFlowProtocolTests
 		IReadOnlyCollection<string> ticked,
 		double? polling = null,
 		bool autoElevate = false,
-		IEnumerable<(string? Name, string? Url, string? Key)>? remotes = null,
+		IEnumerable<(string? Name, string? Url, string? Key, string? UserName, string? Password)>? remotes = null,
 		IEnumerable<(string Sensor, SensorUnit? Unit)>? units = null,
 		IEnumerable<(SensorType Kind, SensorUnit Unit)>? defaults = null)
 	{
