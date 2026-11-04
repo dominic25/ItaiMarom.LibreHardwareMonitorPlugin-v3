@@ -119,7 +119,7 @@ internal static class ClassicWindowPage
 			font: 12px/1.4 Consolas, monospace;
 		}
 		.remote-row {
-			display: grid; grid-template-columns: minmax(140px, 1fr) minmax(220px, 2fr) auto;
+			display: grid; grid-template-columns: minmax(140px, 1fr) minmax(220px, 2fr) minmax(140px, 1fr) minmax(140px, 1fr) auto auto;
 			gap: 8px; margin-bottom: 8px;
 		}
 		.remote-row input {
@@ -127,7 +127,14 @@ internal static class ClassicWindowPage
 			background: var(--bg); color: var(--text); font: inherit; min-width: 0;
 		}
 		.remote-row input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+		.remote-row button.test,
 		.remote-row button.remove { padding: 7px 12px; }
+		.remote-row button.test { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+		.remote-row button.test:hover { background: var(--accent); color: #fff; }
+		.remote-row button.test:disabled { opacity: 0.5; cursor: not-allowed; }
+		.remote-row .test-result { padding: 7px 12px; font-size: 12px; border-radius: 6px; min-width: 120px; }
+		.remote-row .test-result.success { background: #1a3a2a; color: #8fd9a8; border: 1px solid #2d7d4a; }
+		.remote-row .test-result.error { background: #3a1a1a; color: #f9a8a8; border: 1px solid #7d2d2d; }
 		#addRemote { margin-top: 2px; }
 		.defaults {
 			margin: 10px 22px 0; border: 1px solid var(--line); border-radius: 8px;
@@ -405,6 +412,53 @@ internal static class ClassicWindowPage
 
 			syncRemotes();
 
+			// Test connection button for remote machines
+			remoteRows.addEventListener("click", function (event) {
+				var button = event.target.closest("button.test");
+				if (!button) return;
+
+				var row = button.closest(".remote-row");
+				var urlInput = row.querySelector('input[name="remote_url"]');
+				var userInput = row.querySelector('input[name="remote_username"]');
+				var passInput = row.querySelector('input[name="remote_password"]');
+				var resultSpan = row.querySelector(".test-result");
+
+				var url = urlInput?.value?.trim();
+				if (!url) {
+					showTestResult(resultSpan, "Enter a URL first", false);
+					return;
+				}
+
+				button.disabled = true;
+				button.textContent = "Testing…";
+				showTestResult(resultSpan, "Connecting…", null);
+
+				var testUrl = "/test-remote?s=" + encodeURIComponent(window.location.search.slice(1).split("s=")[1]?.split("&")[0] || "");
+				var body = new URLSearchParams();
+				body.append("url", url);
+				if (userInput?.value) body.append("username", userInput.value);
+				if (passInput?.value) body.append("password", passInput.value);
+
+				fetch(testUrl, { method: "POST", body: body, cache: "no-store" })
+					.then(function (response) { return response.json(); })
+					.then(function (data) {
+						showTestResult(resultSpan, data.message || (data.ok ? "Connected" : "Failed"), data.ok);
+					})
+					.catch(function (err) {
+						showTestResult(resultSpan, "Error: " + err.message, false);
+					})
+					.finally(function () {
+						button.disabled = false;
+						button.textContent = "Test";
+					});
+			});
+
+			function showTestResult(span, message, ok) {
+				if (!span) return;
+				span.textContent = message;
+				span.className = "test-result" + (ok === true ? " success" : ok === false ? " error" : "");
+			}
+
 			// The readings are asked for once a second and written into the cell of the sensor they belong
 			// to. Only those cells are touched, so nothing the user has ticked, opened or typed moves under
 			// them, and a cell is never matched by position: it carries the sensor's resource id.
@@ -583,7 +637,7 @@ internal static class ClassicWindowPage
 			.Append(WebUtility.HtmlEncode(remote?.Password ?? string.Empty))
 			.Append("\"><input type=\"hidden\" name=\"remote_key\" value=\"")
 			.Append(WebUtility.HtmlEncode(remote?.Key ?? string.Empty))
-			.Append("\"><button type=\"button\" class=\"remove\" title=\"Remove this remote machine\">Remove</button></div>\n")
+			.Append("\"><button type=\"button\" class=\"test\" title=\"Test connection to this remote machine\">Test</button><button type=\"button\" class=\"remove\" title=\"Remove this remote machine\">Remove</button><span class=\"test-result\" aria-live=\"polite\"></span></div>\n")
 			.ToString();
 	}
 

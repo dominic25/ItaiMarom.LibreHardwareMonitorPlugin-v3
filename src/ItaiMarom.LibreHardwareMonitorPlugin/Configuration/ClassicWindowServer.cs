@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -104,6 +105,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 	/// <summary>Where the page asks for the readings it is showing, one refresh at a time.</summary>
 	private const string ValuesPath = "/values";
+	private const string TestRemotePath = "/test-remote";
 
 	private const string HeaderTerminator = "\r\n\r\n";
 
@@ -400,6 +402,14 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			return new HttpResponse(204, "No Content", "image/x-icon", EmptyBody);
 		}
 
+		if (IsTestRemoteRequest(request))
+		{
+			_logger.Debug("Test remote request: {Target}", request.Target);
+			return key is not null && TryGetSession(key, out _)
+				? await TestRemoteAsync(request, cancellationToken).ConfigureAwait(false)
+				: ClosedWindow();
+		}
+
 		return new HttpResponse(404, "Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("Not found."));
 	}
 
@@ -407,6 +417,88 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		string.Equals(request.Method, "GET", StringComparison.OrdinalIgnoreCase)
 		&& (string.Equals(request.Target, ValuesPath, StringComparison.Ordinal)
 			|| request.Target.StartsWith(ValuesPath + "?", StringComparison.Ordinal));
+
+	private static bool IsTestRemoteRequest(HttpRequest request) =>
+		string.Equals(request.Method, "POST", StringComparison.OrdinalIgnoreCase)
+		&& (string.Equals(request.Target, TestRemotePath, StringComparison.Ordinal)
+			|| request.Target.StartsWith(TestRemotePath + "?", StringComparison.Ordinal));
+
+	/// <summary>
+	/// Tests a remote connection by making a request to the provided URL with optional credentials.
+	/// Returns a JSON response indicating success or failure.
+	/// </summary>
+	private async Task<HttpResponse> TestRemoteAsync(HttpRequest request, CancellationToken cancellationToken)
+	{
+		var form = ParseForm(request.Body);
+		var url = form.TryGetValue("url", out var urls) && urls.Count > 0 ? urls[0] : null;
+		var userName = form.TryGetValue("username", out var users) && users.Count > 0 ? users[0] : null;
+		var password = form.TryGetValue("password", out var passes) && passes.Count > 0 ? passes[0] : null;
+
+		if (string.IsNullOrWhiteSpace(url))
+		{
+			return JsonResponse(new { ok = false, message = "No URL provided" });
+		}
+
+		try
+		{
+			using var httpClient = new HttpClient
+			{
+				Timeout = TimeSpan.FromSeconds(10)
+			};
+
+			// Normalize URL like RemoteSourceAddress does
+			if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+				!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+			{
+				url = "http://" + url;
+			}
+			if (!url.EndsWith("/data.json", StringComparison.OrdinalIgnoreCase))
+			{
+				url = url.TrimEnd('/') + "/data.json";
+			}
+
+			using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url);
+
+			if (!string.IsNullOrEmpty(userName))
+			{
+				var credentials = Convert.ToBase64String(
+					System.Text.Encoding.ASCII.GetBytes($"{userName}:{password ?? string.Empty}"));
+				requestMessage.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+			}
+
+			using var response = await httpClient.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+
+			if (response.IsSuccessStatusCode)
+			{
+				// Try to read a bit of the response to verify it's valid JSON
+				var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+				return JsonResponse(new { ok = true, message = "Connected successfully" });
+			}
+			else
+			{
+				return JsonResponse(new { ok = false, message = $"Server returned {(int)response.StatusCode} {response.ReasonPhrase}" });
+			}
+		}
+		catch (TaskCanceledException)
+		{
+			return JsonResponse(new { ok = false, message = "Connection timed out" });
+		}
+		catch (HttpRequestException ex)
+		{
+			return JsonResponse(new { ok = false, message = "Connection failed: " + ex.Message });
+		}
+		catch (Exception ex)
+		{
+			_logger.Warning(ex, "Test remote connection failed unexpectedly");
+			return JsonResponse(new { ok = false, message = "Unexpected error: " + ex.Message });
+		}
+	}
+
+	private static HttpResponse JsonResponse(object payload)
+	{
+		var json = System.Text.Json.JsonSerializer.Serialize(payload);
+		return new HttpResponse(200, "OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+	}
 
 	/// <summary>
 	/// One refresh of the window's value column: every sensor's reading as text, keyed by resource id, and
