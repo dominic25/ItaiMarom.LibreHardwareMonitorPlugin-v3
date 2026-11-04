@@ -91,7 +91,9 @@ public sealed record RemoteSourceDefinition(string Name, string Url, string Key,
 	private static string NormalizeKey(string? text)
 	{
 		var key = VariableNaming.Sanitize(text);
-		return key.Length > MaximumKeyLength ? key[..MaximumKeyLength].TrimEnd('_') : key;
+		key = key.Length > MaximumKeyLength ? key[..MaximumKeyLength].TrimEnd('_') : key;
+		// "test" is reserved for internal test dummy sources; never allow it as a real remote key
+		return string.Equals(key, "test", StringComparison.OrdinalIgnoreCase) ? "remote" : key;
 	}
 
 	private static string UniqueKey(string stem, ISet<string>? used)

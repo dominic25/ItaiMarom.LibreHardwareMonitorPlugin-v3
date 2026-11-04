@@ -474,7 +474,13 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 				var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
 				// Parse sensors from the response using the provided key (or a fallback)
-				var sensors = ParseRemoteSensors(content, key ?? "remote");
+				// Never allow "test" as a key - it's reserved for internal test dummy sources
+				var effectiveKey = key;
+				if (string.IsNullOrWhiteSpace(effectiveKey) || string.Equals(effectiveKey, "test", StringComparison.OrdinalIgnoreCase))
+				{
+					effectiveKey = "remote";
+				}
+				var sensors = ParseRemoteSensors(content, effectiveKey);
 
 				var sensorInfos = sensors.Select(s => new
 				{

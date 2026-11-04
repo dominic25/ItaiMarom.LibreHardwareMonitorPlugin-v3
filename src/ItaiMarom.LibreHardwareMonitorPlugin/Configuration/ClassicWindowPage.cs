@@ -569,6 +569,8 @@ internal static class ClassicWindowPage
 				var key = clean.replace(/[^A-Za-z0-9]/g, '_').toLowerCase();
 				// Trim to 32 chars, trim trailing underscores
 				if (key.length > 32) key = key.substring(0, 32).replace(/_+$/, '');
+				// "test" is reserved for internal test dummy sources; never allow it as a real remote key
+				if (key === "test" || key.startsWith("test_")) key = "remote";
 				return key || 'remote';
 			}
 
