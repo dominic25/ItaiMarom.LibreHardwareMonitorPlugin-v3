@@ -119,6 +119,29 @@ public sealed class RemoteSensorParserTests
 	}
 
 	[Test]
+	public void The_synthetic_root_is_not_a_device_even_when_it_carries_a_hardware_id()
+	{
+		// A server could stamp an id on the "Sensor" wrapper, even though none of LibreHardwareMonitor's
+		// published shapes does today. It is still a container: treating it as a device names every real
+		// device under it "<machine> · Sensor" and collapses the whole remote machine to one catalog node.
+		var sensors = RemoteSensorParser.Parse(
+			"""
+			{"Text":"Sensor","HardwareId":"/0","Children":[
+			  {"Text":"DESKTOP-ABC","Children":[
+			    {"Text":"CPU","HardwareId":"/cpu","Children":[
+			      {"SensorId":"/cpu/temperature/0","Type":"Temperature","Text":"CPU Core","RawValue":51.0}
+			    ]}
+			  ]}
+			]}
+			""",
+			Source);
+
+		var cpu = sensors.Single();
+		Assert.That(cpu.Sensor.RootHardwareName, Is.EqualTo("Living Room · CPU"));
+		Assert.That(cpu.Sensor.Id, Is.EqualTo("/remote/living_room/cpu/temperature/0"));
+	}
+
+	[Test]
 	public void A_raw_value_is_preferred_over_the_formatted_one()
 	{
 		var sensors = RemoteSensorParser.Parse(

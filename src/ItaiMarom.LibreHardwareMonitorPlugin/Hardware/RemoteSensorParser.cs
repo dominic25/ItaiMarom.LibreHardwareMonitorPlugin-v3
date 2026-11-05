@@ -67,7 +67,7 @@ internal static class RemoteSensorParser
 
 		// The machine on the other end runs the same hardware library, so it repeats an id in the same
 		// cases this machine does. Settling it here keeps one remote sensor from answering for two.
-		Walk(root, null, prefix, source, new UniqueSensorIds(), sensors);
+		Walk(root, null, prefix, source, new UniqueSensorIds(), sensors, isDocumentRoot: true);
 		return sensors;
 	}
 
@@ -76,17 +76,24 @@ internal static class RemoteSensorParser
 	/// location; a node with a sensor id is a leaf; a node with neither is a grouping node - the document
 	/// root and the machine node are both, which is why the walk recognises nodes rather than levels.
 	/// </summary>
+	/// <param name="isDocumentRoot">
+	/// The synthetic "Sensor" node the Remote Web Server wraps the whole tree in. It is a container by
+	/// definition: were a server to stamp a hardware id on it, treating it as a device would make every
+	/// real device a child of a machine called "Sensor" and collapse the catalog to one entry called
+	/// <c>&lt;machine&gt; · Sensor</c>.
+	/// </param>
 	private static void Walk(
 		RemoteNode node,
 		HardwareLocation? hardware,
 		string prefix,
 		RemoteSourceDefinition source,
 		UniqueSensorIds ids,
-		List<HardwareSensor> sensors)
+		List<HardwareSensor> sensors,
+		bool isDocumentRoot = false)
 	{
 		var location = hardware;
 
-		if (NormalizeIdentifier(node.HardwareId) is { } hardwareId)
+		if (!isDocumentRoot && NormalizeIdentifier(node.HardwareId) is { } hardwareId)
 		{
 			var name = string.IsNullOrWhiteSpace(node.Text) ? "Hardware" : node.Text.Trim();
 			location = hardware is null
