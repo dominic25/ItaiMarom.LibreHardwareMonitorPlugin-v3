@@ -133,6 +133,23 @@ internal static class WindowClient
 	}
 
 	/// <summary>
+	/// Posts a form to one of the window's JSON endpoints and gives back the parsed answer. Used by the
+	/// Test button's endpoint, whose whole point is the sensor list it answers with.
+	/// </summary>
+	public static async Task<JsonElement> PostForJsonAsync(Uri uri, IEnumerable<KeyValuePair<string, string>> fields)
+	{
+		using var response = await Client
+			.PostAsync(uri, new FormUrlEncodedContent(fields))
+			.ConfigureAwait(false);
+
+		Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK), $"POST {uri} failed.");
+
+		var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+		using var document = JsonDocument.Parse(json);
+		return document.RootElement.Clone();
+	}
+
+	/// <summary>
 	/// One sensor's unit selector as the page rendered it. Assertions about which option is selected go
 	/// through this rather than the whole document, because the defaults editor renders selectors of its
 	/// own - a page-wide check would find its Celsius row and mistake it for the sensor's.

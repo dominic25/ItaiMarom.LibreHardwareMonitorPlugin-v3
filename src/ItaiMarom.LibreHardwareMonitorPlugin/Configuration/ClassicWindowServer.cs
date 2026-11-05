@@ -431,6 +431,7 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	{
 		var form = ParseForm(request.Body);
 		var url = form.TryGetValue("url", out var urls) && urls.Count > 0 ? urls[0] : null;
+		var name = form.TryGetValue("name", out var names) && names.Count > 0 ? names[0] : null;
 		var userName = form.TryGetValue("username", out var users) && users.Count > 0 ? users[0] : null;
 		var password = form.TryGetValue("password", out var passes) && passes.Count > 0 ? passes[0] : null;
 		var key = form.TryGetValue("key", out var keys) && keys.Count > 0 ? keys[0] : null;
@@ -473,14 +474,16 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			{
 				var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
-				// Parse sensors from the response using the provided key (or a fallback)
-				// Never allow "test" as a key - it's reserved for internal test dummy sources
-				var effectiveKey = key;
-				if (string.IsNullOrWhiteSpace(effectiveKey) || string.Equals(effectiveKey, "test", StringComparison.OrdinalIgnoreCase) || effectiveKey.StartsWith("test_", StringComparison.OrdinalIgnoreCase))
+				// Build the same definition a save would build, so the sensor tree the Test button
+				// adds is laid out exactly like the one a reopened window shows: the label the user
+				// typed (or the address when blank) names the machine and its hardware, and the
+				// normalised key namespaces the sensor ids.
+				if (!RemoteSourceDefinition.TryCreate(name, url, key, null, null, out var definition, userName, password))
 				{
-					effectiveKey = "remote";
+					return JsonResponse(new { ok = false, message = "The address is not valid" });
 				}
-				var sensors = ParseRemoteSensors(content, effectiveKey);
+
+				var sensors = ParseRemoteSensors(content, definition!);
 
 				var sensorInfos = sensors.Select(s => new
 				{
@@ -497,6 +500,8 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 				{
 					ok = true,
 					message = "Connected successfully",
+					name = definition!.Name,
+					key = definition.Key,
 					sensors = sensorInfos,
 					sensorCount = sensorInfos.Length
 				});
@@ -524,13 +529,11 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	/// <summary>
 	/// Parses sensors from a remote /data.json response using the same logic as RemoteHardwareSource.
 	/// </summary>
-	private static IReadOnlyList<HardwareSensor> ParseRemoteSensors(string json, string key)
+	private static IReadOnlyList<HardwareSensor> ParseRemoteSensors(string json, RemoteSourceDefinition source)
 	{
 		try
 		{
-			// Use the provided key for the remote source so sensor resource IDs are namespaced correctly
-			var dummySource = new RemoteSourceDefinition("Test", "http://test", key);
-			return RemoteSensorParser.Parse(json, dummySource);
+			return RemoteSensorParser.Parse(json, source);
 		}
 		catch
 		{

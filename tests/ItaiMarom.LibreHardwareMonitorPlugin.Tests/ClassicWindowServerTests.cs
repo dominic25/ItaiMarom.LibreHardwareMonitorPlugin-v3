@@ -1,4 +1,7 @@
 using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
 using ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using LibreHardwareMonitor.Hardware;
@@ -279,6 +282,38 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task Testing_a_remote_lays_out_its_sensors_like_a_saved_source()
+	{
+		var opened = Open([CpuCore1], CpuCore1);
+
+		await using var remote = new RemoteDataStub();
+
+		// What the Test button posts: the address, the label the user typed, and the key it generated
+		// for a row that has not been saved yet.
+		var result = await WindowClient.PostForJsonAsync(
+			new Uri(opened.PageUri, "/test-remote?s=" + opened.Key),
+			[
+				new KeyValuePair<string, string>("url", remote.Address),
+				new KeyValuePair<string, string>("name", "Living Room"),
+				new KeyValuePair<string, string>("key", "living_room"),
+			]);
+
+		Assert.That(result.GetProperty("ok").GetBoolean(), Is.True, result.ToString());
+
+		// The answer carries the same definition a save would build, so the branch the page adds is
+		// named and keyed exactly like one a reopened window shows.
+		Assert.That(result.GetProperty("name").GetString(), Is.EqualTo("Living Room"));
+		Assert.That(result.GetProperty("key").GetString(), Is.EqualTo("living_room"));
+
+		var sensor = result.GetProperty("sensors")[0];
+		Assert.That(sensor.GetProperty("hardware").GetString(), Is.EqualTo("Living Room · AMD Ryzen 7 5800X"));
+		Assert.That(sensor.GetProperty("hardware").GetString(), Does.Not.StartWith("Test"));
+		Assert.That(
+			sensor.GetProperty("resourceId").GetString(),
+			Does.StartWith("/remote/living_room/amdcpu/0/temperature/0"));
+	}
+
+	[Test]
 	public async Task A_sensor_that_can_be_shown_in_another_unit_offers_a_selector()
 	{
 		var page = await WindowClient.ReadPageAsync(Open([CpuCore1, CpuTotal], CpuCore1).PageUri);
@@ -497,6 +532,11 @@ public sealed class ClassicWindowServerTests
 
 		Assert.That(page, Does.Contain("<span class=\"name machine\">Living Room</span>"));
 		Assert.That(page, Does.Contain("<span class=\"name machine\">Office PC</span>"));
+
+		// The branch is tagged with its source key so the Test button can replace it instead of adding
+		// a second copy of the same machine.
+		Assert.That(page, Does.Contain("data-remote-key=\"living_room\""));
+		Assert.That(page, Does.Contain("data-remote-key=\"office_pc\""));
 
 		// The machine branch already names the PC, so the hardware under it is not qualified again.
 		Assert.That(page, Does.Not.Contain("Living Room · CPU"));
@@ -855,5 +895,127 @@ public sealed class ClassicWindowServerTests
 		}
 
 		return count;
+	}
+
+	/// <summary>
+	/// A stand-in for LibreHardwareMonitor's Remote Web Server on loopback. It speaks just enough HTTP
+	/// for the Test button's request and answers with one small sensor tree, so the endpoint is exercised
+	/// over a real socket rather than through a seam the production code does not have.
+	/// </summary>
+	private sealed class RemoteDataStub : IAsyncDisposable
+	{
+		private const string Document = """
+			{
+			  "Text": "Sensor",
+			  "Children": [
+			    {
+			      "Text": "DESKTOP-ABC",
+			      "HardwareId": "/",
+			      "Children": [
+			        {
+			          "Text": "AMD Ryzen 7 5800X",
+			          "HardwareId": "/amdcpu/0",
+			          "Children": [
+			            {
+			              "Text": "Temperatures",
+			              "Children": [
+			                {
+			                  "Text": "CPU Core #1",
+			                  "SensorId": "/amdcpu/0/temperature/0",
+			                  "Type": "Temperature",
+			                  "RawValue": 51.0,
+			                  "Value": "51.0 °C"
+			                }
+			              ]
+			            }
+			          ]
+			        }
+			      ]
+			    }
+			  ]
+			}
+			""";
+
+		private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+		private readonly CancellationTokenSource _cancellation = new();
+		private readonly Task _serving;
+
+		public RemoteDataStub()
+		{
+			_listener.Start();
+			Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+			_serving = Task.Run(ServeAsync);
+		}
+
+		public int Port { get; }
+
+		public string Address => $"http://127.0.0.1:{Port}";
+
+		private async Task ServeAsync()
+		{
+			while (!_cancellation.IsCancellationRequested)
+			{
+				TcpClient client;
+				try
+				{
+					client = await _listener.AcceptTcpClientAsync(_cancellation.Token).ConfigureAwait(false);
+				}
+				catch (Exception)
+				{
+					return;
+				}
+
+				using (client)
+				{
+					using var stream = client.GetStream();
+					await ReadRequestAsync(stream).ConfigureAwait(false);
+
+					var body = Encoding.UTF8.GetBytes(Document);
+					var head = Encoding.ASCII.GetBytes(
+						$"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+
+					await stream.WriteAsync(head, _cancellation.Token).ConfigureAwait(false);
+					await stream.WriteAsync(body, _cancellation.Token).ConfigureAwait(false);
+					await stream.FlushAsync(_cancellation.Token).ConfigureAwait(false);
+				}
+			}
+		}
+
+		private static async Task ReadRequestAsync(NetworkStream stream)
+		{
+			var buffer = new byte[4096];
+			var read = 0;
+			while (read < buffer.Length)
+			{
+				var count = await stream.ReadAsync(buffer.AsMemory(read)).ConfigureAwait(false);
+				if (count == 0)
+				{
+					return;
+				}
+
+				read += count;
+				if (Encoding.ASCII.GetString(buffer, 0, read).Contains("\r\n\r\n", StringComparison.Ordinal))
+				{
+					return;
+				}
+			}
+		}
+
+		public async ValueTask DisposeAsync()
+		{
+			_cancellation.Cancel();
+			_listener.Stop();
+
+			try
+			{
+				await _serving.ConfigureAwait(false);
+			}
+			catch (Exception)
+			{
+				// The accept loop is cancelled by design when the fixture is torn down.
+			}
+
+			_cancellation.Dispose();
+		}
 	}
 }

@@ -431,9 +431,11 @@ internal static class ClassicWindowPage
 					return;
 				}
 
-				// Generate a key from the URL if the key input is empty or is "test"/"test_*"
+				// Generate a key from the URL if the key input is empty (for new rows not yet saved).
+				// A saved row keeps its key so a rename cannot move the variables already bound to it.
+				// "test" is reserved for internal dummy sources and is never used as a real key.
 				var key = keyInput?.value?.trim();
-				if (!key || key === "test" || key.startsWith("test_")) {
+				if (!key || key === "test") {
 					key = generateKeyFromUrl(url);
 					if (keyInput) keyInput.value = key;
 				}
@@ -446,6 +448,7 @@ internal static class ClassicWindowPage
 				var testUrl = "/test-remote?s=" + encodeURIComponent(sessionKey);
 				var body = new URLSearchParams();
 				body.append("url", url);
+				body.append("name", nameInput?.value || "");
 				if (userInput?.value) body.append("username", userInput.value);
 				if (passInput?.value) body.append("password", passInput.value);
 				body.append("key", key);
@@ -454,10 +457,11 @@ internal static class ClassicWindowPage
 					.then(function (response) { return response.json(); })
 					.then(function (data) {
 						if (data.ok && data.sensors && data.sensors.length > 0) {
-							// Add sensors to the tree
+							// The server answers with the definition a save would build, so the branch
+							// added here is laid out exactly like the one a reopened window shows.
 							addRemoteSensorsToTree(
-								keyInput?.value || "remote",
-								nameInput?.value || url,
+								data.key || keyInput?.value || "remote",
+								data.name || nameInput?.value || url,
 								data.sensors
 							);
 							showTestResult(resultSpan, "Connected - " + data.sensorCount + " sensors added", true);
@@ -570,7 +574,7 @@ internal static class ClassicWindowPage
 				// Trim to 32 chars, trim trailing underscores
 				if (key.length > 32) key = key.substring(0, 32).replace(/_+$/, '');
 				// "test" is reserved for internal test dummy sources; never allow it as a real remote key
-				if (key === "test" || key.startsWith("test_")) key = "remote";
+				if (key === "test") key = "remote";
 				return key || 'remote';
 			}
 
@@ -846,7 +850,8 @@ internal static class ClassicWindowPage
 				machine.First().MachineName ?? machine.Key,
 				machineTicked,
 				machineSensors.Length,
-				machineSensors.Any(sensor => sensor.Controllable));
+				machineSensors.Any(sensor => sensor.Controllable),
+				machine.Key);
 
 			foreach (var root in machine.GroupBy(category => category.RootName, StringComparer.Ordinal))
 			{
@@ -927,9 +932,12 @@ internal static class ClassicWindowPage
 		string name,
 		int ticked,
 		int count,
-		bool containsControl)
+		bool containsControl,
+		string? remoteKey = null)
 	{
-		builder.Append(ticked > 0 ? "\t<details open>\n" : "\t<details>\n")
+		builder.Append(ticked > 0 ? "\t<details open" : "\t<details")
+			.Append(remoteKey is null ? ">" : $" data-remote-key=\"{WebUtility.HtmlEncode(remoteKey)}\">")
+			.Append('\n')
 			.Append("\t\t<summary><input type=\"checkbox\">")
 			.Append("<span class=\"name ")
 			.Append(kind)
