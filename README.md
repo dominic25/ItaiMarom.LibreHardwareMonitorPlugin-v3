@@ -27,11 +27,14 @@ without them.
   names the Macro Deck 2 plugin used, so an upgraded layout keeps working.
 - **A browsable catalog** - every sensor on the machine, including the ones you did not tick, one binding
   away in Macro Deck's variable browser.
-- **Fan and pump control** - two actions, *Set fan speed* and *Restore fan control*, plus a writable
-  variable for every sensor that reports a software control, which is what the built-in **Slider** widget
-  binds to. No plugin-specific widget is involved.
+- **Fan and pump control** - three actions, *Set fan speed*, *Restore fan control* and *Restore all
+  fans*, plus a writable variable for every sensor that reports a software control, which is what the
+  built-in **Slider** widget binds to. No plugin-specific widget is involved. Fans are handed back to the
+  motherboard when the plugin shuts down cleanly unless you clear that box, so a speed set once cannot
+  outlive the plugin by accident. A plugin process that is killed outright cannot run that last step.
 - **The polling rate you choose** - the rate set in the sensor window is how often the plugin reads the
-  hardware and how often Macro Deck reads a variable, rather than the host's own five-second default.
+  hardware and how often Macro Deck reads a variable, rather than the host's own five-second default. A
+  remote machine follows the same rate, but is never polled faster than once a second.
 - **Elevated readings at startup** - tick the box in the sensor window and the plugin asks Windows for
   administrator rights at each start, so the driver-backed readings are there without pressing the issue's
   button. Leave it clear to be prompted only when you press that button.
@@ -39,7 +42,12 @@ without them.
   browser, with a live reading beside every sensor.
 - **Other machines on the same deck** - add a PC running LibreHardwareMonitor's Remote Web Server and its
   hardware appears in the same tree and catalog. Local sensors keep their names; remote ones are prefixed
-  with the machine's key, and are read-only.
+  with the machine's key, and are read-only. Each remote also gets an online flag and a status variable,
+  an offline badge in the sensor window, an issue with a **Retry now** button, and a notification when it
+  goes down - so a sleeping PC is not mistaken for missing sensors.
+- **Rescan instead of restart** - *Rescan hardware* in the sensor window, or the action of the same name,
+  re-reads the machine so a device attached or removed since Macro Deck started appears without a restart.
+  Fan speeds set by software are put back after the rescan.
 
 ## Getting started
 
@@ -60,7 +68,13 @@ without them.
    The value in the window and the variable share the choice.
 5. Tick **Start elevated readings at startup** if you want the plugin to ask Windows for administrator
    rights at every Macro Deck start, rather than only when you press **Enable elevated readings** in the
-   issue list. Leave it clear to be prompted only when you press that button.
+   issue list. Leave it clear to be prompted only when you press that button. When the helper is running,
+   the window says so and offers **Stop helper**, which hands every fan back to the motherboard before it
+   stops.
+   **Restore fan control on exit** is ticked by default and hands every software-driven fan back when the
+   plugin shuts down cleanly. Clear it if a fan should keep its written speed after the plugin goes away.
+   **Rescan hardware** beside the filter re-reads the tree, which is how a device attached after Macro
+   Deck started becomes tickable without restarting anything.
 6. To watch another PC as well, expand **Remote machines**, press **Add remote machine**, give it a name
    and its address, and leave the row in the list. `host:8085` and the full
    `http://host:8085/data.json` address both work. The other PC must be running LibreHardwareMonitor with
@@ -77,6 +91,19 @@ machine is identified by a key derived from its name, and that key is kept when 
 variables already bound to its sensors do not move. Remote variables carry the key in front of the local
 name - `{{ vars.living_room_cpu_total_load }}`, for example - so two machines can publish a sensor with
 the same name.
+
+Every remote also publishes two variables of its own, whether or not you tick any of its sensors:
+
+- `living_room_online` - true while the machine is answering, false once it has failed repeatedly. Bind
+  it to a tile's state mapping, or test it in a flow.
+- `living_room_status` - `Online`, `Reconnecting`, `Offline` or `Connecting`, for a label.
+
+A remote is polled in the background, so a sleeping PC cannot hold up this machine's readings. While it
+is unreachable the machine's branch in the sensor window carries an **offline** badge with the last
+error, Macro Deck's issue list shows one issue per offline machine with a **Retry now** button, and one
+notification is raised when it goes down (not on every retry). Coming back clears the issue and dismisses
+the notification by itself. A machine that was already asleep when Macro Deck started shows the issue and
+the flag but does not notify, because it was never online in that session.
 
 Three badges explain what a sensor can be used for:
 
@@ -121,11 +148,17 @@ sensor as on a local one.
 - **Feed an action from it.** A templated field hands the reading to the action in place of the
   reference, so a notification can say what the GPU temperature is rather than referring to a variable
   name.
+- **Show whether elevated readings are on.** `{{ vars.elevated_readings }}` is true while the helper is
+  reading the driver-backed sensors and driving fans.
 - **Set a fan speed.** Add the **Set fan speed** action, pick the fan or pump in the **Fan** dropdown
   (the list says whether the hardware driver, and therefore elevation, is what is hiding it), and give a
   **Speed** between 0 and 100 percent of that fan's own range.
 - **Hand a fan back.** A speed set by software outlives the plugin process, so add **Restore fan control**
-  to the same button, or to a "silence" button, to return the fan to the motherboard's curve.
+  to the same button, or to a "silence" button, to return the fan to the motherboard's curve. **Restore
+  all fans** does the same for every controllable fan at once, and the window's **Restore fan control on
+  exit** box does it when Macro Deck stops.
+- **Pick up new hardware.** Add **Rescan hardware** to a button for a laptop that docks and undocks, or a
+  drive that comes and goes. Fan speeds written before the rescan are applied again afterwards.
 - **Drag instead of press.** Bind a **Slider** widget to a controllable fan's variable. The track takes
   its range from the chip, the write happens when you let go rather than at every intermediate point, and
   the slider settles on what the chip accepted. The plugin also holds every write to the chip's own range,
@@ -163,8 +196,8 @@ its limited mode. The prompt appears on the PC running Macro Deck, not on the de
 
 ## Requirements
 
-- Windows x64 - the platform the plugin is packaged for.
-- Macro Deck 3 (prerelease).
+- Windows x64 - the platform the plugin is packaged for. Windows on ARM is not packaged.
+- Macro Deck 3.
 - Optional: PawnIO and administrator rights, for processor temperature and clocks, fan speeds, voltages,
   drive health and fan control. The plugin starts its own elevated helper from the issue list, or at
   startup if you asked it to, so Macro Deck itself does not have to run elevated. See

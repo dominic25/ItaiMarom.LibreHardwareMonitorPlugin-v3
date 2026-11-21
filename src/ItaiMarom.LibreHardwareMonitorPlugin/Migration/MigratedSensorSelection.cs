@@ -40,7 +40,8 @@ public sealed record MigratedSensorSelection(
 	TimeSpan? PollingInterval,
 	bool? AutoElevate = null,
 	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null,
-	IReadOnlyDictionary<SensorType, SensorUnit>? UnitDefaults = null)
+	IReadOnlyDictionary<SensorType, SensorUnit>? UnitDefaults = null,
+	bool? RestoreFansOnExit = null)
 {
 	/// <summary>The value the sensor list is stored under.</summary>
 	public const string SensorsKey = "sensors";
@@ -68,6 +69,13 @@ public sealed record MigratedSensorSelection(
 	/// defaults existed carry.
 	/// </summary>
 	public const string UnitDefaultsKey = "unit_defaults";
+
+	/// <summary>
+	/// Whether the plugin hands every software fan control back when it shuts down. Absent means on: a fan
+	/// left at a written speed with nothing able to undo it is the failure this preference exists to
+	/// avoid, and restoring is the safer first answer for a user who never touches the checkbox.
+	/// </summary>
+	public const string RestoreFansOnExitKey = "restore_fans_on_exit";
 
 	/// <summary>Nothing migrated, or nothing that could be read back.</summary>
 	public static MigratedSensorSelection Empty { get; } = new([], null);
@@ -99,6 +107,13 @@ public sealed record MigratedSensorSelection(
 		{
 			values[AutoElevateKey] = JsonSerializer.SerializeToElement(
 				autoElevate ? "true" : "false",
+				SerializerOptions);
+		}
+
+		if (RestoreFansOnExit is { } restoreFans)
+		{
+			values[RestoreFansOnExitKey] = JsonSerializer.SerializeToElement(
+				restoreFans ? "true" : "false",
 				SerializerOptions);
 		}
 
@@ -181,6 +196,7 @@ public sealed record MigratedSensorSelection(
 		var remoteKeys = new HashSet<string>(StringComparer.Ordinal);
 		TimeSpan? pollingInterval = null;
 		bool? autoElevate = null;
+		bool? restoreFansOnExit = null;
 		IReadOnlyDictionary<SensorType, SensorUnit>? unitDefaults = null;
 
 		foreach (var entry in entries)
@@ -200,9 +216,15 @@ public sealed record MigratedSensorSelection(
 			}
 
 			if (autoElevate is null
-				&& ReadAutoElevate(await ReadValueAsync(config, entry, AutoElevateKey, logger, cancellationToken).ConfigureAwait(false)) is { } preference)
+				&& ReadPreference(await ReadValueAsync(config, entry, AutoElevateKey, logger, cancellationToken).ConfigureAwait(false)) is { } preference)
 			{
 				autoElevate = preference;
+			}
+
+			if (restoreFansOnExit is null
+				&& ReadPreference(await ReadValueAsync(config, entry, RestoreFansOnExitKey, logger, cancellationToken).ConfigureAwait(false)) is { } restoreFans)
+			{
+				restoreFansOnExit = restoreFans;
 			}
 
 			if (unitDefaults is null
@@ -221,7 +243,13 @@ public sealed record MigratedSensorSelection(
 				remoteKeys);
 		}
 
-		return new MigratedSensorSelection(sensors, pollingInterval, autoElevate, remoteSources, unitDefaults);
+		return new MigratedSensorSelection(
+			sensors,
+			pollingInterval,
+			autoElevate,
+			remoteSources,
+			unitDefaults,
+			restoreFansOnExit);
 	}
 
 	private static async Task<string?> ReadValueAsync(
@@ -292,7 +320,8 @@ public sealed record MigratedSensorSelection(
 		return TimeSpan.FromMilliseconds(milliseconds);
 	}
 
-	private static bool? ReadAutoElevate(string? stored) =>
+	/// <summary>Reads one stored yes/no preference.</summary>
+	private static bool? ReadPreference(string? stored) =>
 		bool.TryParse(stored, out var value) ? value : null;
 
 	/// <summary>

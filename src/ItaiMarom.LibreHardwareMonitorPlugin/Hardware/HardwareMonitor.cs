@@ -40,6 +40,13 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	private readonly Dictionary<SensorIdentifier, Reading> _readings = [];
 	private readonly HashSet<SensorIdentifier> _watched = [];
 
+	/// <summary>
+	/// The software value last written to each fan, kept so a rescan can put it back. A rebuilt control
+	/// starts in its default mode, and a user who set a fan should not have that silently undone by a
+	/// rescan.
+	/// </summary>
+	private readonly Dictionary<string, float> _softwareControls = new(StringComparer.Ordinal);
+
 	private CancellationTokenSource? _cancellation;
 	private Task? _loop;
 	private bool _isOpen;
@@ -114,13 +121,20 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	{
 		ArgumentNullException.ThrowIfNull(options);
 
-		Volatile.Write(ref _options, options.Normalized());
+		var normalized = options.Normalized();
+		Volatile.Write(ref _options, normalized);
+
+		// A remote source fetches on its own schedule; telling it the loop's rate is what keeps that
+		// schedule in step with the setting the user chose.
+		_source.SetPollingInterval(normalized.PollingInterval);
 	}
 
 	/// <summary>Starts the loop. Does nothing when it is already running.</summary>
 	public void Start()
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
+
+		_source.SetPollingInterval(Options.PollingInterval);
 
 		lock (_sync)
 		{
@@ -272,9 +286,19 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	{
 		ArgumentException.ThrowIfNullOrEmpty(sensorId);
 
-		return await WithHardwareAsync(
+		var applied = await WithHardwareAsync(
 			source => source.SetControl(sensorId, (float)value),
 			cancellationToken).ConfigureAwait(false);
+
+		if (applied)
+		{
+			lock (_sync)
+			{
+				_softwareControls[sensorId] = (float)value;
+			}
+		}
+
+		return applied;
 	}
 
 	/// <summary>
@@ -284,8 +308,108 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	{
 		ArgumentException.ThrowIfNullOrEmpty(sensorId);
 
-		return await WithHardwareAsync(
+		var reset = await WithHardwareAsync(
 			source => source.ResetControl(sensorId),
+			cancellationToken).ConfigureAwait(false);
+
+		if (reset)
+		{
+			lock (_sync)
+			{
+				_softwareControls.Remove(sensorId);
+			}
+		}
+
+		return reset;
+	}
+
+	/// <summary>
+	/// Hands every controllable sensor back to the hardware's own curve. This is the "Restore all fans"
+	/// action and the way out of elevated mode, where the helper is about to go away and could not undo
+	/// its writes afterwards.
+	/// </summary>
+	public async Task<ControlResetResult> ResetAllControlsAsync(CancellationToken cancellationToken = default)
+	{
+		return await WithHardwareAsync(
+			source =>
+			{
+				var controls = source.ReadControls();
+				var failed = new List<string>();
+
+				foreach (var control in controls)
+				{
+					try
+					{
+						if (!source.ResetControl(control.Id))
+						{
+							failed.Add(control.Id);
+						}
+					}
+					catch (Exception exception)
+					{
+						_logger.Debug(exception, "The control of {SensorId} could not be reset.", control.Id);
+						failed.Add(control.Id);
+					}
+				}
+
+				lock (_sync)
+				{
+					_softwareControls.Clear();
+				}
+
+				return new ControlResetResult(controls.Count - failed.Count, failed);
+			},
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Forgets the software fan values written so far. Used when the helper hands every control back:
+	/// the values are no longer in effect, so a later rescan must not put them back.
+	/// </summary>
+	public void ForgetSoftwareControls()
+	{
+		lock (_sync)
+		{
+			_softwareControls.Clear();
+		}
+	}
+
+	/// <summary>
+	/// Re-enumerates the hardware and re-applies every software fan value that was written before it.
+	/// Returns the sensors the rebuilt tree now exposes.
+	/// </summary>
+	public async Task<RescanResult> RescanAsync(CancellationToken cancellationToken = default)
+	{
+		return await WithHardwareAsync(
+			source =>
+			{
+				source.Rescan();
+
+				Dictionary<string, float> software;
+				lock (_sync)
+				{
+					software = new Dictionary<string, float>(_softwareControls, StringComparer.Ordinal);
+				}
+
+				foreach (var pair in software)
+				{
+					try
+					{
+						if (!source.SetControl(pair.Key, pair.Value))
+						{
+							_logger.Debug(
+								"The control of {SensorId} was not present after the rescan; it was not re-applied.",
+								pair.Key);
+						}
+					}
+					catch (Exception exception)
+					{
+						_logger.Debug(exception, "The control of {SensorId} could not be re-applied after a rescan.", pair.Key);
+					}
+				}
+
+				return new RescanResult(source.Read(null));
+			},
 			cancellationToken).ConfigureAwait(false);
 	}
 
@@ -456,3 +580,11 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	/// <summary>One cached value and the moment the poll that produced it finished.</summary>
 	private readonly record struct Reading(double Value, ControlRange? Control, DateTimeOffset SampledAt);
 }
+
+/// <summary>What one "hand every fan back" request managed to do.</summary>
+/// <param name="Reset">How many controls were reset successfully.</param>
+/// <param name="Failed">The sensors whose control refused or vanished, by id.</param>
+public sealed record ControlResetResult(int Reset, IReadOnlyList<string> Failed);
+
+/// <summary>What the rebuilt hardware tree exposes after a rescan.</summary>
+public sealed record RescanResult(IReadOnlyList<HardwareSensor> Sensors);

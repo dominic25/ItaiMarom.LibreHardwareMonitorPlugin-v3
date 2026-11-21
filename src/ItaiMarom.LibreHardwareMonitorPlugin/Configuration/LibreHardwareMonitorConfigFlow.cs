@@ -66,7 +66,10 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 	private readonly SensorSelection _selection;
 	private readonly ClassicWindowServer _window;
 	private readonly bool _autoElevate;
+	private readonly bool _restoreFansOnExit;
 	private readonly RemoteSourceSelection _remotes;
+	private readonly IHardwareElevation? _elevation;
+	private readonly IRemoteHealthSource? _remoteHealth;
 	private readonly ILogger _logger;
 
 	/// <summary>
@@ -81,14 +84,20 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		ClassicWindowServer window,
 		ILogger logger,
 		bool autoElevate = false,
-		RemoteSourceSelection? remotes = null)
+		RemoteSourceSelection? remotes = null,
+		bool restoreFansOnExit = true,
+		IHardwareElevation? elevation = null,
+		IRemoteHealthSource? remoteHealth = null)
 	{
 		_hardware = hardware ?? throw new ArgumentNullException(nameof(hardware));
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
 		_window = window ?? throw new ArgumentNullException(nameof(window));
 		_logger = (logger ?? throw new ArgumentNullException(nameof(logger))).ForContext<LibreHardwareMonitorConfigFlow>();
 		_autoElevate = autoElevate;
+		_restoreFansOnExit = restoreFansOnExit;
 		_remotes = remotes ?? new RemoteSourceSelection();
+		_elevation = elevation;
+		_remoteHealth = remoteHealth;
 	}
 
 	/// <inheritdoc />
@@ -151,7 +160,13 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 				_autoElevate,
 				_remotes.Remotes,
 				SensorReadingSource.UnitsOf(_selection),
-				_selection.UnitDefaults));
+				_selection.UnitDefaults,
+				_restoreFansOnExit,
+				_elevation?.IsElevated ?? false,
+				_remoteHealth?.RemoteStatuses.ToDictionary(
+					status => status.Key,
+					status => status,
+					StringComparer.Ordinal)));
 
 			_logger.Information(
 				"The classic sensor window was opened on {SensorCount} sensors at {WindowUri}.",
@@ -211,7 +226,13 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 			sensors.Count,
 			remotes.Count);
 
-		return Complete(sensors, polling, payload.AutoElevate, remotes, defaults);
+		return Complete(
+			sensors,
+			polling,
+			payload.AutoElevate,
+			payload.RestoreFansOnExit,
+			remotes,
+			defaults);
 	}
 
 	/// <summary>What the screen ends in: the selection written as a configuration entry.</summary>
@@ -219,6 +240,7 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		IReadOnlyList<SensorIdentifier> sensors,
 		TimeSpan? polling,
 		bool autoElevate,
+		bool restoreFansOnExit,
 		List<RemoteSourceDefinition> remotes,
 		IReadOnlyDictionary<SensorType, SensorUnit> defaults)
 	{
@@ -231,7 +253,8 @@ internal sealed class LibreHardwareMonitorConfigFlow : IConfigFlow
 		// box is unticked: from here on the plugin has a preference rather than an unset one.
 		return ConfigFlowResult.Complete(
 			EntryTitle,
-			new MigratedSensorSelection(sensors, polling, autoElevate, remotes, defaults).ToConfigurationValues());
+			new MigratedSensorSelection(sensors, polling, autoElevate, remotes, defaults, restoreFansOnExit)
+				.ToConfigurationValues());
 	}
 
 	/// <summary>

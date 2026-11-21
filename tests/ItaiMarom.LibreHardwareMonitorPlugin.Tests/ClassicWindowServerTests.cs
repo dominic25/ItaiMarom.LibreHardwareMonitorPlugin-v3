@@ -306,7 +306,8 @@ public sealed class ClassicWindowServerTests
 		Assert.That(result.GetProperty("key").GetString(), Is.EqualTo("living_room"));
 
 		var sensor = result.GetProperty("sensors")[0];
-		Assert.That(sensor.GetProperty("hardware").GetString(), Is.EqualTo("Living Room · AMD Ryzen 7 5800X"));
+		// The machine branch above this hardware already names the PC, so the name is not qualified twice.
+		Assert.That(sensor.GetProperty("hardware").GetString(), Is.EqualTo("AMD Ryzen 7 5800X"));
 		Assert.That(sensor.GetProperty("hardware").GetString(), Does.Not.StartWith("Test"));
 		Assert.That(
 			sensor.GetProperty("resourceId").GetString(),
@@ -545,6 +546,168 @@ public sealed class ClassicWindowServerTests
 		// The local CPU and the living room's CPU are two branches, not one merged by name.
 		Assert.That(Occurrences(page, "<span class=\"name root\">CPU</span>"), Is.EqualTo(2));
 		Assert.That(Occurrences(page, "<span class=\"name root\">GPU</span>"), Is.EqualTo(1));
+	}
+
+	[Test]
+	public async Task An_offline_remote_keeps_its_branch_and_shows_the_error()
+	{
+		var remote = new RemoteSourceDefinition("Living Room", "living-room-pc:8085", "living_room");
+		var opened = _server.Open(new ClassicWindowOpening(
+			"Libre Hardware Monitor",
+			SensorCategory.Build([]),
+			[],
+			1000,
+			10,
+			10000,
+			RedirectUri,
+			State,
+			RemoteSources: [remote],
+			RemoteHealth: new Dictionary<string, RemoteSourceStatus>(StringComparer.Ordinal)
+			{
+				[remote.Key] = new(
+					remote.Key,
+					remote.Name,
+					remote.Url,
+					new RemoteSourceHealth(
+						RemoteSourceState.Offline,
+						DateTimeOffset.UtcNow,
+						"connection refused",
+						3)),
+			}));
+
+		var page = await WindowClient.ReadPageAsync(opened.PageUri);
+
+		Assert.That(page, Does.Contain("<span class=\"name machine\">Living Room</span>"));
+		Assert.That(page, Does.Contain("class=\"offline\""));
+		Assert.That(page, Does.Contain("connection refused"));
+	}
+
+	[Test]
+	public async Task The_window_offers_to_stop_a_running_helper()
+	{
+		var opened = _server.Open(new ClassicWindowOpening(
+			"Libre Hardware Monitor",
+			SensorCategory.Build([CpuCore1]),
+			[CpuCore1.ResourceId],
+			1000,
+			10,
+			10000,
+			RedirectUri,
+			State,
+			Elevated: true));
+
+		var page = await WindowClient.ReadPageAsync(opened.PageUri);
+
+		Assert.That(page, Does.Contain("Elevated readings are on"));
+		Assert.That(page, Does.Contain("id=\"stopHelper\""));
+	}
+
+	[Test]
+	public async Task The_window_can_rescan_and_show_the_rebuilt_tree()
+	{
+		var rebuilt = false;
+		await using var server = new ClassicWindowServer(
+			new LoggerConfiguration().CreateLogger(),
+			_readings,
+			rebuild: (opening, _) =>
+			{
+				rebuilt = true;
+				return Task.FromResult(opening with
+				{
+					Categories = SensorCategory.Build([CpuCore1, CpuCore2]),
+				});
+			});
+		var opened = server.Open(new ClassicWindowOpening(
+			"Libre Hardware Monitor",
+			SensorCategory.Build([CpuCore1]),
+			[CpuCore1.ResourceId],
+			1000,
+			10,
+			10000,
+			RedirectUri,
+			State));
+
+		var result = await WindowClient.PostForJsonAsync(
+			new Uri(opened.PageUri, $"/rescan?s={opened.Key}"),
+			[]);
+
+		Assert.That(rebuilt, Is.True);
+		Assert.That(result.GetProperty("ok").GetBoolean(), Is.True);
+		Assert.That(result.GetProperty("sensors").GetInt32(), Is.EqualTo(2));
+	}
+
+	[Test]
+	public async Task The_window_can_stop_the_elevated_helper()
+	{
+		using var elevation = new FakeElevatableSource(elevated: true);
+		await using var server = new ClassicWindowServer(
+			new LoggerConfiguration().CreateLogger(),
+			_readings,
+			elevation);
+		var opened = server.Open(new ClassicWindowOpening(
+			"Libre Hardware Monitor",
+			SensorCategory.Build([CpuCore1]),
+			[CpuCore1.ResourceId],
+			1000,
+			10,
+			10000,
+			RedirectUri,
+			State));
+
+		var result = await WindowClient.PostForJsonAsync(
+			new Uri(opened.PageUri, $"/stop-helper?s={opened.Key}"),
+			[]);
+
+		Assert.That(elevation.DisableCount, Is.EqualTo(1));
+		Assert.That(result.GetProperty("ok").GetBoolean(), Is.True);
+	}
+
+	[Test]
+	public async Task A_saved_password_is_not_rendered_back_into_the_page()
+	{
+		var remote = new RemoteSourceDefinition(
+			"Living Room",
+			"http://living-room-pc:8085",
+			"living_room",
+			"monitor",
+			"hunter2");
+
+		var page = await WindowClient.ReadPageAsync(
+			OpenWithRemotes([remote], [CpuCore1], CpuCore1).PageUri);
+
+		// The page is loopback-only, but a secret that is written into the markup is in the browser's
+		// cache, the DOM and anything that can ask for the page. The marker is what says one is stored.
+		Assert.That(page, Does.Not.Contain("hunter2"));
+		Assert.That(page, Does.Contain("Saved password - leave blank to keep"));
+		Assert.That(page, Does.Contain("name=\"remote_has_password\" value=\"1\""));
+	}
+
+	[Test]
+	public async Task A_blank_password_field_keeps_the_saved_password()
+	{
+		var remote = new RemoteSourceDefinition(
+			"Living Room",
+			"http://living-room-pc:8085",
+			"living_room",
+			"monitor",
+			"hunter2");
+		var opened = OpenWithRemotes([remote], [CpuCore1], CpuCore1);
+
+		await WindowClient.PostAsync(
+			opened.PageUri,
+			[
+				new KeyValuePair<string, string>("sensors", CpuCore1.ResourceId),
+				new KeyValuePair<string, string>("remote_name", remote.Name),
+				new KeyValuePair<string, string>("remote_url", remote.Url),
+				new KeyValuePair<string, string>("remote_username", remote.UserName!),
+				new KeyValuePair<string, string>("remote_password", string.Empty),
+				new KeyValuePair<string, string>("remote_has_password", "1"),
+				new KeyValuePair<string, string>("remote_key", remote.Key),
+				new KeyValuePair<string, string>("save", "1"),
+			]);
+
+		Assert.That(_server.TryTakePayload(opened.Key, out var payload), Is.True);
+		Assert.That(payload!.Remotes!.Single().Password, Is.EqualTo("hunter2"));
 	}
 
 	[Test]

@@ -24,6 +24,15 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource, IAccessN
 	/// <summary>How many times the control list was asked for.</summary>
 	public int ControlReadCount { get; private set; }
 
+	/// <summary>How many times the hardware was re-enumerated.</summary>
+	public int RescanCount { get; private set; }
+
+	/// <summary>The polling interval the monitor last handed the source.</summary>
+	public TimeSpan? LastPollingInterval { get; private set; }
+
+	/// <summary>Runs inside <see cref="Rescan"/>, for a test that simulates a rebuilt control.</summary>
+	public Action? OnRescan { get; set; }
+
 	/// <summary>The hardware filter handed to the most recent <see cref="Read"/>.</summary>
 	public IReadOnlyCollection<string>? LastFilter { get; private set; }
 
@@ -130,6 +139,16 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource, IAccessN
 	{
 		CloseCount++;
 		IsOpen = false;
+	}
+
+	/// <inheritdoc />
+	public void SetPollingInterval(TimeSpan interval) => LastPollingInterval = interval;
+
+	/// <inheritdoc />
+	public void Rescan()
+	{
+		RescanCount++;
+		OnRescan?.Invoke();
 	}
 
 	/// <inheritdoc />

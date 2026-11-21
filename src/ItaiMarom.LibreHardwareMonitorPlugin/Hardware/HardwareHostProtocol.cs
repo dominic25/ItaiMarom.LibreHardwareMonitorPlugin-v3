@@ -8,7 +8,7 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 /// <summary>One request the plugin sends to the elevated hardware helper.</summary>
 internal sealed class HardwareHostRequest
 {
-	/// <summary>One of <c>hello</c>, <c>open</c>, <c>close</c>, <c>read</c>, <c>controls</c>, <c>set</c>, <c>reset</c>, <c>ping</c> or <c>stop</c>.</summary>
+	/// <summary>One of <c>hello</c>, <c>open</c>, <c>close</c>, <c>read</c>, <c>controls</c>, <c>rescan</c>, <c>set</c>, <c>reset</c>, <c>ping</c> or <c>stop</c>.</summary>
 	public required string Type { get; init; }
 
 	/// <summary>The shared secret, sent only by <c>hello</c>.</summary>

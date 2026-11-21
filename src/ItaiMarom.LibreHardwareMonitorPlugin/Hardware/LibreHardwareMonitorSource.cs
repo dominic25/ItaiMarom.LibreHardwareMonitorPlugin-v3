@@ -31,6 +31,14 @@ public sealed class LibreHardwareMonitorSource : IHardwareSensorSource
 	public void Close() => _computer.Close();
 
 	/// <inheritdoc />
+	/// <remarks>
+	/// <see cref="Computer.Reset"/> closes and re-creates every hardware group, which is what makes a
+	/// device that was attached or removed since the plugin started appear without a restart. It is
+	/// called under the monitor's hardware gate, like every other access to <see cref="Computer"/>.
+	/// </remarks>
+	public void Rescan() => _computer.Reset();
+
+	/// <inheritdoc />
 	public IReadOnlyList<HardwareSensor> Read(IReadOnlyCollection<string>? hardwareFilter)
 	{
 		HashSet<string>? filter = hardwareFilter is { Count: > 0 }

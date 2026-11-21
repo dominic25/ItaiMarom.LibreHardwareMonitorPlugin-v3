@@ -115,4 +115,67 @@
   <data name="Variables.Write.Unavailable" xml:space="preserve">
     <value>The sensor cannot be controlled right now. Fan control needs the elevated hardware helper, or Macro Deck running as administrator, with the hardware driver loaded.</value>
   </data>
+  <data name="Actions.RestoreAllFans.Name" xml:space="preserve">
+    <value>Restore all fans</value>
+  </data>
+  <data name="Actions.RestoreAllFans.Description" xml:space="preserve">
+    <value>Hands every controllable fan and pump back to the motherboard's own curve in one press. Useful as a "silence everything" or shutdown button.</value>
+  </data>
+  <data name="Actions.RestoreAllFans.Reset" xml:space="preserve">
+    <value>Every fan and pump was handed back to the motherboard's own control.</value>
+  </data>
+  <data name="Actions.RestoreAllFans.None" xml:space="preserve">
+    <value>No controllable fans or pumps were found. The hardware library's driver is either not loaded or not available to this process.</value>
+  </data>
+  <data name="Actions.RescanHardware.Name" xml:space="preserve">
+    <value>Rescan hardware</value>
+  </data>
+  <data name="Actions.RescanHardware.Description" xml:space="preserve">
+    <value>Re-reads the machine's hardware, so a device attached or removed since Macro Deck started appears without a restart. Software fan speeds are re-applied afterwards.</value>
+  </data>
+  <data name="Actions.RescanHardware.Done" xml:space="preserve">
+    <value>The hardware was re-read.</value>
+  </data>
+  <data name="Actions.RescanHardware.Failed" xml:space="preserve">
+    <value>The hardware could not be re-read.</value>
+  </data>
+  <data name="Issues.RemoteOffline.Title" xml:space="preserve">
+    <value>A remote machine is unreachable</value>
+  </data>
+  <data name="Issues.RemoteOffline.Action" xml:space="preserve">
+    <value>Retry now</value>
+  </data>
+  <data name="Issues.RemoteOffline.Resolved" xml:space="preserve">
+    <value>Retrying the remote machine now.</value>
+  </data>
+  <data name="Issues.RemoteOffline.Unknown" xml:space="preserve">
+    <value>Unknown remote machine.</value>
+  </data>
+  <data name="Issues.RemoteOffline.NotificationTitle" xml:space="preserve">
+    <value>A remote machine is offline</value>
+  </data>
+  <data name="Variables.Remote.Online" xml:space="preserve">
+    <value>Online</value>
+  </data>
+  <data name="Variables.Remote.Offline" xml:space="preserve">
+    <value>Offline</value>
+  </data>
+  <data name="Variables.Remote.Reconnecting" xml:space="preserve">
+    <value>Reconnecting</value>
+  </data>
+  <data name="Variables.Remote.Unknown" xml:space="preserve">
+    <value>Connecting</value>
+  </data>
+  <data name="Variables.Remote.OnlineDescription" xml:space="preserve">
+    <value>Whether this remote machine is answering. True while it is online, false once it has failed repeatedly.</value>
+  </data>
+  <data name="Variables.Remote.StatusDescription" xml:space="preserve">
+    <value>Online, Offline, Reconnecting or Connecting, for a label or a flow condition.</value>
+  </data>
+  <data name="Variables.Elevated.DisplayName" xml:space="preserve">
+    <value>Elevated readings</value>
+  </data>
+  <data name="Variables.Elevated.Description" xml:space="preserve">
+    <value>Whether the elevated hardware helper is currently reading the driver-backed sensors and driving fans.</value>
+  </data>
 </root>

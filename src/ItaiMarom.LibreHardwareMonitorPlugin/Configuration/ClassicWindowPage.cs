@@ -43,6 +43,8 @@ internal static class ClassicWindowPage
 	private const string PollingMinimumMarker = "__POLLING_MIN__";
 	private const string PollingMaximumMarker = "__POLLING_MAX__";
 	private const string AutoElevateMarker = "__AUTO_ELEVATE__";
+	private const string RestoreFansMarker = "__RESTORE_FANS__";
+	private const string ElevationStatusMarker = "__ELEVATION_STATUS__";
 	private const string RemotesMarker = "__REMOTES__";
 	private const string RemoteTemplateMarker = "__REMOTE_TEMPLATE__";
 	private const string RemotesOpenMarker = "__REMOTES_OPEN__";
@@ -106,6 +108,13 @@ internal static class ClassicWindowPage
 		}
 		#filter:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 		#counts, #updated { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+		#rescanResult { color: var(--dim); font-size: 12px; }
+		.elevated { display: flex; align-items: center; gap: 8px; color: #f0dcae; white-space: nowrap; }
+		.elevated button { padding: 5px 10px; font-size: 12px; }
+		.password-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+		.password-cell input[type="password"] { flex: 1; min-width: 0; }
+		.clear-password { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 11px; white-space: nowrap; cursor: pointer; }
+		.remote-warning { flex-basis: 100%; color: #d9a13b; font-size: 11px; }
 		.remotes {
 			margin: 10px 22px 0; border: 1px solid var(--line); border-radius: 8px;
 			background: var(--panel);
@@ -193,6 +202,10 @@ internal static class ClassicWindowPage
 		li label .writable { border: 1px solid var(--accent); color: #a9c6ff; }
 		summary .contains { border: 1px dashed var(--accent); color: var(--accent); }
 		li label .readonly { border: 1px solid var(--line); color: var(--missing); font-weight: 500; }
+		summary .offline {
+			flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
+			border: 1px solid #7d2d2d; background: #3a1a1a; color: #f9a8a8;
+		}
 		footer {
 			display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
 			padding: 14px 22px; background: var(--panel); border-top: 1px solid var(--line);
@@ -228,6 +241,9 @@ internal static class ClassicWindowPage
 			<div class="toolbar">
 				<input type="search" id="filter" placeholder="Filter sensors&hellip;" aria-label="Filter sensors">
 				<span id="counts"></span>
+				<button type="button" id="rescan" title="Re-read the machine's hardware, so a device attached or removed since Macro Deck started appears here.">Rescan hardware</button>
+				<span id="rescanResult" aria-live="polite"></span>
+				__ELEVATION_STATUS__
 			</div>
 
 			<details class="remotes" id="remotes"__REMOTES_OPEN__>
@@ -263,6 +279,10 @@ internal static class ClassicWindowPage
 						<input type="checkbox" name="auto_elevate" value="1"__AUTO_ELEVATE__>
 						Start elevated readings at startup
 					</label>
+					<label title="Hand every software-controlled fan back to the motherboard when Macro Deck stops. A speed set by software outlives this process, so without this a fan keeps the last value until the machine restarts. On by default.">
+						<input type="checkbox" name="restore_fans" value="1"__RESTORE_FANS__>
+						Restore fan control on exit
+					</label>
 				</div>
 				<div class="actions">
 					<button type="submit" name="cancel" value="1">Cancel</button>
@@ -282,6 +302,11 @@ internal static class ClassicWindowPage
 			var filter = document.getElementById("filter");
 			var polling = document.getElementById("polling");
 			var pollingRange = document.getElementById("pollingRange");
+
+			function sessionKey() {
+				var match = /[?&]s=([^&]+)/.exec(window.location.search);
+				return match ? decodeURIComponent(match[1]) : "";
+			}
 
 			// The group tick boxes are not submitted - they only drive the sensors under them, so they start
 			// indeterminate wherever the sensors disagree and never carry a value of their own.
@@ -411,6 +436,77 @@ internal static class ClassicWindowPage
 			});
 
 			syncRemotes();
+
+			// Credentials over plain http are readable by anything on the path between the two machines.
+			// The warning follows the fields instead of blocking the save: a trusted LAN is a real setup.
+			function updateRemoteWarning(row) {
+				var warning = row.querySelector(".remote-warning");
+				if (!warning) return;
+				var url = row.querySelector('input[name="remote_url"]');
+				var user = row.querySelector('input[name="remote_username"]');
+				var insecure = url && user
+					&& /^http:\/\//i.test(url.value.trim())
+					&& user.value.trim().length > 0;
+				warning.textContent = insecure ? "Credentials are sent unencrypted over http." : "";
+			}
+
+			var existingRows = remoteRows.querySelectorAll(".remote-row");
+			for (var r = 0; r < existingRows.length; r++) updateRemoteWarning(existingRows[r]);
+			remoteRows.addEventListener("input", function (event) {
+				var row = event.target.closest(".remote-row");
+				if (row) updateRemoteWarning(row);
+			});
+
+			var rescan = document.getElementById("rescan");
+			var rescanResult = document.getElementById("rescanResult");
+			if (rescan) {
+				rescan.addEventListener("click", function () {
+					rescan.disabled = true;
+					rescan.textContent = "Rescanning\u2026";
+
+					// Send the form as it stands, so ticking a sensor and then rescanning to find the
+					// device it belongs to does not throw the ticks away.
+					var body = new URLSearchParams(new FormData(form));
+					fetch("/rescan?s=" + encodeURIComponent(sessionKey()), { method: "POST", body: body, cache: "no-store" })
+						.then(function (response) { return response.json(); })
+						.then(function (data) {
+							if (data.ok) {
+								rescanResult.textContent = "Rescan finished: " + data.sensors + " sensors, "
+									+ data.added + " added, " + data.removed + " removed.";
+								window.setTimeout(function () { window.location.reload(); }, 900);
+							} else {
+								rescanResult.textContent = data.message || "Rescan failed.";
+							}
+						})
+						.catch(function (error) {
+							rescanResult.textContent = "Rescan failed: " + error.message;
+						})
+						.finally(function () {
+							rescan.disabled = false;
+							rescan.textContent = "Rescan hardware";
+						});
+				});
+			}
+
+			var stopHelper = document.getElementById("stopHelper");
+			if (stopHelper) {
+				stopHelper.addEventListener("click", function () {
+					if (!window.confirm("Stop the elevated helper? Fans it is driving are handed back to the motherboard first.")) return;
+					stopHelper.disabled = true;
+					stopHelper.textContent = "Stopping\u2026";
+					fetch("/stop-helper?s=" + encodeURIComponent(sessionKey()), { method: "POST", cache: "no-store" })
+						.then(function (response) { return response.json(); })
+						.then(function (data) {
+							if (data.ok) window.location.reload();
+							else { stopHelper.disabled = false; stopHelper.textContent = "Stop helper"; window.alert(data.message || "The helper could not be stopped."); }
+						})
+						.catch(function (error) {
+							stopHelper.disabled = false;
+							stopHelper.textContent = "Stop helper";
+							window.alert("The helper could not be stopped: " + error.message);
+						});
+				});
+			}
 
 			// Test connection button for remote machines
 			remoteRows.addEventListener("click", function (event) {
@@ -705,6 +801,8 @@ internal static class ClassicWindowPage
 			.Replace(PollingMaximumMarker, Milliseconds(opening.MaximumPollingMilliseconds), StringComparison.Ordinal)
 			.Replace(PollingMarker, Milliseconds(opening.PollingMilliseconds), StringComparison.Ordinal)
 			.Replace(AutoElevateMarker, opening.AutoElevate ? " checked" : string.Empty, StringComparison.Ordinal)
+			.Replace(RestoreFansMarker, opening.RestoreFansOnExit ? " checked" : string.Empty, StringComparison.Ordinal)
+			.Replace(ElevationStatusMarker, RenderElevation(opening), StringComparison.Ordinal)
 			.Replace(RemotesOpenMarker, opening.RemoteSources is { Count: > 0 } ? " open" : string.Empty, StringComparison.Ordinal)
 			.Replace(RemotesMarker, RenderRemotes(opening), StringComparison.Ordinal)
 			.Replace(RemoteTemplateMarker, RenderRemoteRow(null), StringComparison.Ordinal)
@@ -780,6 +878,11 @@ internal static class ClassicWindowPage
 	/// <summary>One row of the remote editor, and the blank row the page clones when one is added.</summary>
 	private static string RenderRemoteRow(RemoteSourceDefinition? remote)
 	{
+		var hasPassword = !string.IsNullOrEmpty(remote?.Password);
+		var insecure = remote is not null
+			&& remote.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+			&& !string.IsNullOrEmpty(remote.UserName);
+
 		return new StringBuilder()
 			.Append("<div class=\"remote-row\"><input type=\"text\" name=\"remote_name\" placeholder=\"Name (optional)\" aria-label=\"Remote machine name\" value=\"")
 			.Append(WebUtility.HtmlEncode(remote?.Name ?? string.Empty))
@@ -787,9 +890,14 @@ internal static class ClassicWindowPage
 			.Append(WebUtility.HtmlEncode(remote?.Url ?? string.Empty))
 			.Append("\"><input type=\"text\" name=\"remote_username\" placeholder=\"User (optional)\" aria-label=\"Remote machine username\" value=\"")
 			.Append(WebUtility.HtmlEncode(remote?.UserName ?? string.Empty))
-			.Append("\"><input type=\"password\" name=\"remote_password\" placeholder=\"Password (optional)\" aria-label=\"Remote machine password\" autocomplete=\"current-password\" value=\"")
-			.Append(WebUtility.HtmlEncode(remote?.Password ?? string.Empty))
-			.Append("\"><input type=\"hidden\" name=\"remote_key\" value=\"")
+			.Append("\"><input type=\"hidden\" name=\"remote_has_password\" value=\"")
+			.Append(hasPassword ? "1" : string.Empty)
+			.Append("\"><div class=\"password-cell\"><input type=\"password\" name=\"remote_password\" placeholder=\"")
+			.Append(hasPassword ? "Saved password - leave blank to keep" : "Password (optional)")
+			.Append("\" aria-label=\"Remote machine password\" autocomplete=\"new-password\" value=\"\">")
+			.Append("<span class=\"remote-warning\" aria-live=\"polite\">")
+			.Append(insecure ? "Credentials are sent unencrypted over http." : string.Empty)
+			.Append("</span></div><input type=\"hidden\" name=\"remote_key\" value=\"")
 			.Append(WebUtility.HtmlEncode(remote?.Key ?? string.Empty))
 			.Append("\"><button type=\"button\" class=\"test\" title=\"Test connection to this remote machine\">Test</button><button type=\"button\" class=\"remove\" title=\"Remove this remote machine\">Remove</button><span class=\"test-result\" aria-live=\"polite\"></span></div>\n")
 			.ToString();
@@ -802,6 +910,15 @@ internal static class ClassicWindowPage
 	/// so the line reads as a warning rather than as small print. Nothing at all when there is nothing to
 	/// say, which is the usual case.
 	/// </summary>
+	/// <summary>
+	/// The elevation status beside the toolbar. The helper is one-way today unless the user can stop it,
+	/// so when it is running this is where that is said and where it is undone.
+	/// </summary>
+	private static string RenderElevation(ClassicWindowOpening opening) =>
+		opening.Elevated
+			? "<span class=\"elevated\">Elevated readings are on <button type=\"button\" id=\"stopHelper\" title=\"Stop the administrator helper for this session. Fans it is driving are handed back first.\">Stop helper</button></span>"
+			: string.Empty;
+
 	private static string RenderNotice(string? notice) =>
 		string.IsNullOrWhiteSpace(notice)
 			? string.Empty
@@ -815,7 +932,7 @@ internal static class ClassicWindowPage
 	private static string RenderTree(ClassicWindowOpening opening)
 	{
 		var categories = opening.Categories;
-		if (categories.Count == 0)
+		if (categories.Count == 0 && opening.RemoteSources is not { Count: > 0 })
 		{
 			return "\t\t<p class=\"empty\">No sensors were reported by this machine.</p>";
 		}
@@ -844,6 +961,11 @@ internal static class ClassicWindowPage
 			var machineSensors = machine.SelectMany(category => category.Sensors).ToArray();
 			var machineTicked = machineSensors.Count(sensor => selected.Contains(sensor.ResourceId));
 
+			var health = opening.RemoteHealth is { } remoteHealth
+				&& remoteHealth.TryGetValue(machine.Key, out var status)
+					? status.Health
+					: (RemoteSourceHealth?)null;
+
 			AppendOpen(
 				builder,
 				"machine",
@@ -851,13 +973,32 @@ internal static class ClassicWindowPage
 				machineTicked,
 				machineSensors.Length,
 				machineSensors.Any(sensor => sensor.Controllable),
-				machine.Key);
+				machine.Key,
+				health);
 
 			foreach (var root in machine.GroupBy(category => category.RootName, StringComparer.Ordinal))
 			{
 				AppendHardwareRoot(builder, root.Key, root, selected, values, units, defaults);
 			}
 
+			builder.Append("\t</details>\n");
+		}
+
+		// A configured machine with no readings - offline, or never answered - still gets its branch, so
+		// the offline badge does not disappear along with the sensors it is meant to explain.
+		foreach (var remote in opening.RemoteSources ?? [])
+		{
+			if (categories.Any(category => string.Equals(category.Source, remote.Key, StringComparison.Ordinal)))
+			{
+				continue;
+			}
+
+			var health = opening.RemoteHealth is { } remoteHealth
+				&& remoteHealth.TryGetValue(remote.Key, out var status)
+					? status.Health
+					: (RemoteSourceHealth?)null;
+
+			AppendOpen(builder, "machine", remote.Name, 0, 0, false, remote.Key, health);
 			builder.Append("\t</details>\n");
 		}
 
@@ -933,7 +1074,8 @@ internal static class ClassicWindowPage
 		int ticked,
 		int count,
 		bool containsControl,
-		string? remoteKey = null)
+		string? remoteKey = null,
+		RemoteSourceHealth? remoteHealth = null)
 	{
 		builder.Append(ticked > 0 ? "\t<details open" : "\t<details")
 			.Append(remoteKey is null ? ">" : $" data-remote-key=\"{WebUtility.HtmlEncode(remoteKey)}\">")
@@ -949,6 +1091,13 @@ internal static class ClassicWindowPage
 		{
 			builder.Append(
 				"<span class=\"contains\" title=\"A sensor below can be driven by the built-in Slider widget.\">control below</span>");
+		}
+
+		if (remoteHealth is { State: RemoteSourceState.Offline } offline)
+		{
+			builder.Append("<span class=\"offline\" title=\"")
+				.Append(WebUtility.HtmlEncode(offline.LastError ?? "The machine is not answering."))
+				.Append("\">offline</span>");
 		}
 
 		builder.Append("<span class=\"count\">")

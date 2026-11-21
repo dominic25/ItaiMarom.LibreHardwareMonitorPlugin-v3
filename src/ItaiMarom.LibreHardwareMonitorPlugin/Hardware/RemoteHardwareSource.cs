@@ -17,19 +17,42 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 /// can safely drive.
 /// </para>
 /// <para>
-/// A failing remote must never delay the local poll behind it. The call is synchronous because the
-/// polling seam is synchronous, so a dead address is retried on a backoff instead of on every interval:
-/// one attempt, then one second, two, four, up to a minute. A successful read resets that.
+/// The HTTP call never happens on the polling thread. Once <see cref="Open"/> is called, a background
+/// loop owns the remote address and publishes the newest tree; <see cref="Read"/> only returns what that
+/// loop last fetched. That is what stops a slow or sleeping machine from holding the local poll behind a
+/// five-second timeout.
+/// </para>
+/// <para>
+/// Failures back off - one attempt, then one second, two, four, up to a minute - and move the machine
+/// through <see cref="RemoteSourceState.Degraded"/> to <see cref="RemoteSourceState.Offline"/>. A
+/// successful read resets both. The state is exposed through <see cref="IRemoteHealthSource"/> so the
+/// issue list, the window and the variables can all say "unreachable" instead of showing a dash with no
+/// explanation.
 /// </para>
 /// <para>
 /// When the remote source definition includes credentials, an <c>Authorization: Basic</c> header is
 /// added to each request. The password is never logged.
 /// </para>
 /// </remarks>
-public sealed class RemoteHardwareSource : IHardwareSensorSource
+public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthSource
 {
 	/// <summary>Waits after successive failures. The last value repeats once the array runs out.</summary>
 	private static readonly int[] BackoffSeconds = [1, 2, 4, 8, 16, 30, 60];
+
+	/// <summary>Failures in a row before the machine is called unreachable rather than flaky.</summary>
+	private const int OfflineAfterFailures = 3;
+
+	/// <summary>
+	/// A remote is not polled at the local loop's finest rate. A ten-millisecond interval is meant for
+	/// on-board sensors, not for an HTTP request to another PC.
+	/// </summary>
+	private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(1);
+
+	/// <summary>
+	/// A published tree older than this is no longer offered to the loop as a current reading. It is well
+	/// above the HTTP timeout so one slow but successful fetch does not make a sensor blink out and back.
+	/// </summary>
+	private static readonly TimeSpan MinimumSnapshotLifetime = TimeSpan.FromSeconds(10);
 
 	private readonly RemoteSourceDefinition _definition;
 	private readonly ILogger _logger;
@@ -38,6 +61,19 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource
 	private readonly string? _authHeader;
 	private readonly object _sync = new();
 
+	/// <summary>Serialises a manual refresh against the background loop's refresh.</summary>
+	private readonly SemaphoreSlim _refreshing = new(1, 1);
+
+	/// <summary>Wakes the loop early for a retry or a rescan. One outstanding wake is enough.</summary>
+	private readonly SemaphoreSlim _wake = new(0, 1);
+
+	private IReadOnlyCollection<string>? _hardwareFilter;
+	private IReadOnlyList<HardwareSensor> _snapshot = [];
+	private DateTimeOffset _snapshotAt;
+	private TimeSpan _pollingInterval = TimeSpan.FromSeconds(1);
+	private CancellationTokenSource? _loopCancellation;
+	private Task? _loop;
+	private RemoteSourceHealth _health = RemoteSourceHealth.Unknown;
 	private int _failures;
 	private long _retryAt;
 	private bool _disposed;
@@ -69,92 +105,131 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource
 	}
 
 	/// <inheritdoc />
+	public event EventHandler<RemoteHealthChangedEventArgs>? RemoteHealthChanged;
+
+	/// <summary>This machine's reachability right now.</summary>
+	public RemoteSourceHealth Health
+	{
+		get
+		{
+			lock (_sync)
+			{
+				return _health;
+			}
+		}
+	}
+
+	/// <inheritdoc />
+	public IReadOnlyList<RemoteSourceStatus> RemoteStatuses => [Status()];
+
+	/// <inheritdoc />
 	public void Open()
 	{
-		// Nothing to open: the server owns its hardware and is already serving when the plugin starts.
+		lock (_sync)
+		{
+			if (_disposed || _loop is not null)
+			{
+				return;
+			}
+
+			var cancellation = new CancellationTokenSource();
+			_loopCancellation = cancellation;
+			_loop = Task.Run(() => PollLoopAsync(cancellation), CancellationToken.None);
+		}
 	}
 
 	/// <inheritdoc />
 	public void Close()
 	{
-		// Nothing to close on the other machine.
+		StopLoop();
+
+		lock (_sync)
+		{
+			_snapshot = [];
+			_snapshotAt = default;
+		}
 	}
 
 	/// <inheritdoc />
-	public IReadOnlyList<HardwareSensor> Read(IReadOnlyCollection<string>? hardwareFilter)
+	public void SetPollingInterval(TimeSpan interval)
 	{
-		// The polling loop hands every source the watched set. A remote whose label none of the watched
-		// hardware belongs to is skipped before any network call, so an idle remote costs nothing.
-		if (hardwareFilter is { Count: > 0 }
-			&& !hardwareFilter.Any(_definition.MatchesHardwareFilter))
-		{
-			return [];
-		}
+		var normalized = interval < MinimumPollingInterval ? MinimumPollingInterval : interval;
+		var running = false;
 
 		lock (_sync)
 		{
 			if (_disposed)
 			{
-				return [];
+				return;
 			}
 
-			var now = Environment.TickCount64;
-			if (now < _retryAt)
-			{
-				return [];
-			}
-
-			try
-			{
-				using var request = new HttpRequestMessage(HttpMethod.Get, _definition.Url);
-
-				// Add Basic Auth header if credentials are configured
-				if (_authHeader is not null)
-				{
-					request.Headers.Authorization = new AuthenticationHeaderValue("Basic", _authHeader["Basic ".Length..]);
-				}
-
-				// The body is read here rather than off the live stream: the seam is synchronous, and a
-				// server that stalls halfway through the document would otherwise hold the whole loop
-				// past the timeout that was supposed to bound it.
-				using var response = _http.Send(request, HttpCompletionOption.ResponseContentRead);
-
-				if (response.StatusCode is not HttpStatusCode.OK)
-				{
-					throw new HttpRequestException(
-						$"The remote source answered {(int)response.StatusCode} {response.ReasonPhrase}.");
-				}
-
-				using var stream = response.Content.ReadAsStream();
-				var sensors = RemoteSensorParser.Parse(stream, _definition);
-
-				_failures = 0;
-				_retryAt = 0;
-				return sensors;
-			}
-			catch (Exception exception)
-			{
-				_failures = Math.Min(_failures + 1, BackoffSeconds.Length);
-				_retryAt = now + (BackoffSeconds[_failures - 1] * 1000L);
-
-				if (_failures == 1)
-				{
-					_logger.Warning(
-						exception,
-						"The remote source {RemoteSource} could not be read; retrying with a backoff.",
-						_definition.Name);
-				}
-				else
-				{
-					_logger.Debug(
-						exception,
-						"The remote source {RemoteSource} is still unavailable.",
-						_definition.Name);
-				}
-
-				return [];
-			}
+			_pollingInterval = normalized;
+			running = _loop is not null;
 		}
+
+		// A shorter interval should not wait out the old one before it takes effect. Without a loop
+		// there is nothing to wake, and a permit would only buy an extra fetch when it starts.
+		if (running)
+		{
+			Wake();
+		}
+	}
+
+	/// <inheritdoc />
+	public IReadOnlyList<HardwareSensor> Read(IReadOnlyCollection<string>? hardwareFilter)
+	{
+		lock (_sync)
+		{
+			_hardwareFilter = hardwareFilter;
+
+			if (_disposed || !Wanted(hardwareFilter) || _snapshot.Count == 0)
+			{
+				return [];
+			}
+
+			return DateTimeOffset.UtcNow - _snapshotAt > SnapshotLifetime
+				? []
+				: _snapshot;
+		}
+	}
+
+	/// <inheritdoc />
+	/// <remarks>
+	/// A rescan is user-initiated and expects the newest tree when it returns, so it fetches once here
+	/// rather than only waking the loop. It also ignores the watched-hardware filter: the sensor window
+	/// rescanning wants to see everything the machine has, including a sensor nobody has ticked yet.
+	/// </remarks>
+	public void Rescan()
+	{
+		lock (_sync)
+		{
+			if (_disposed)
+			{
+				return;
+			}
+
+			_hardwareFilter = null;
+			_retryAt = 0;
+		}
+
+		RefreshAsync(CancellationToken.None).GetAwaiter().GetResult();
+	}
+
+	/// <inheritdoc />
+	public bool TryRetryRemote(string key)
+	{
+		if (!string.Equals(key, _definition.Key, StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		lock (_sync)
+		{
+			_retryAt = 0;
+		}
+
+		Wake();
+		return true;
 	}
 
 	/// <inheritdoc />
@@ -169,6 +244,8 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource
 	/// <inheritdoc />
 	public void Dispose()
 	{
+		CancellationTokenSource? cancellation;
+
 		lock (_sync)
 		{
 			if (_disposed)
@@ -177,11 +254,296 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource
 			}
 
 			_disposed = true;
+			_snapshot = [];
+			cancellation = _loopCancellation;
+			_loopCancellation = null;
+			_loop = null;
 		}
+
+		cancellation?.Cancel();
 
 		if (_ownsClient)
 		{
 			_http.Dispose();
+		}
+
+		// The two semaphores are deliberately not disposed: the background loop may still be finishing a
+		// request, and disposing a semaphore under the task that is about to release it turns a clean
+		// shutdown into an ObjectDisposedException. They own no unmanaged state worth reclaiming.
+	}
+
+	/// <summary>
+	/// Fetches the remote tree once and publishes it. This is what the background loop calls; it is also
+	/// what a test calls to move the source without waiting for a timer.
+	/// </summary>
+	internal async Task<bool> RefreshAsync(CancellationToken cancellationToken)
+	{
+		lock (_sync)
+		{
+			if (_disposed || !Wanted(_hardwareFilter) || Environment.TickCount64 < _retryAt)
+			{
+				return false;
+			}
+		}
+
+		await _refreshing.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			lock (_sync)
+			{
+				if (_disposed || Environment.TickCount64 < _retryAt)
+				{
+					return false;
+				}
+			}
+
+			using var request = new HttpRequestMessage(HttpMethod.Get, _definition.Url);
+
+			// Add Basic Auth header if credentials are configured
+			if (_authHeader is not null)
+			{
+				request.Headers.Authorization = new AuthenticationHeaderValue("Basic", _authHeader["Basic ".Length..]);
+			}
+
+			// The body is read here rather than off the live stream: the response has to be complete
+			// before a partial tree can be mistaken for a smaller machine.
+			using var response = await _http
+				.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken)
+				.ConfigureAwait(false);
+
+			if (response.StatusCode is not HttpStatusCode.OK)
+			{
+				throw new HttpRequestException(
+					$"The remote source answered {(int)response.StatusCode} {response.ReasonPhrase}.");
+			}
+
+			await using var stream = await response.Content
+				.ReadAsStreamAsync(cancellationToken)
+				.ConfigureAwait(false);
+			var sensors = RemoteSensorParser.Parse(stream, _definition);
+
+			if (cancellationToken.IsCancellationRequested)
+			{
+				return false;
+			}
+
+			RemoteSourceHealth health;
+			RemoteSourceState previous;
+			lock (_sync)
+			{
+				if (_disposed)
+				{
+					return false;
+				}
+
+				previous = _health.State;
+				_snapshot = sensors;
+				_snapshotAt = DateTimeOffset.UtcNow;
+				_failures = 0;
+				_retryAt = 0;
+				_health = new RemoteSourceHealth(
+					RemoteSourceState.Online,
+					_snapshotAt,
+					null,
+					0);
+				health = _health;
+			}
+
+			Publish(health, previous);
+			return true;
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch (Exception exception)
+		{
+			RecordFailure(exception);
+			return false;
+		}
+		finally
+		{
+			_refreshing.Release();
+		}
+	}
+
+	private async Task PollLoopAsync(CancellationTokenSource cancellation)
+	{
+		var token = cancellation.Token;
+
+		try
+		{
+			while (!token.IsCancellationRequested)
+			{
+				bool wanted;
+				lock (_sync)
+				{
+					wanted = !_disposed && Wanted(_hardwareFilter);
+				}
+
+				if (wanted)
+				{
+					try
+					{
+						await RefreshAsync(token).ConfigureAwait(false);
+					}
+					catch (OperationCanceledException)
+					{
+						break;
+					}
+					catch (Exception exception)
+					{
+						// RefreshAsync handles a failed read itself; this is the last-resort case where it
+						// could not. The loop must survive one bad attempt.
+						_logger.Debug(exception, "The remote source loop caught an unexpected failure.");
+					}
+				}
+
+				TimeSpan delay;
+				lock (_sync)
+				{
+					// Wait out whatever the last failure scheduled, and the normal interval otherwise. A
+					// timer that fires a moment early lands on a tiny remaining wait rather than a whole
+					// extra backoff step.
+					var now = Environment.TickCount64;
+					delay = _retryAt > now
+						? TimeSpan.FromMilliseconds(_retryAt - now)
+						: _pollingInterval;
+				}
+
+				try
+				{
+					await _wake.WaitAsync(delay, token).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException)
+				{
+					break;
+				}
+			}
+		}
+		finally
+		{
+			cancellation.Dispose();
+		}
+	}
+
+	private void RecordFailure(Exception exception)
+	{
+		RemoteSourceHealth health;
+		RemoteSourceState previous;
+		int failures;
+
+		lock (_sync)
+		{
+			if (_disposed)
+			{
+				return;
+			}
+
+			previous = _health.State;
+			failures = ++_failures;
+
+			// The first failure keeps the machine online if it has ever answered: one slow poll is not an
+			// outage. Three in a row is what the user is told to act on.
+			var state = failures >= OfflineAfterFailures
+				? RemoteSourceState.Offline
+				: _health.HasBeenOnline
+					? RemoteSourceState.Degraded
+					: RemoteSourceState.Unknown;
+
+			_retryAt = Environment.TickCount64
+				+ (BackoffSeconds[Math.Min(failures - 1, BackoffSeconds.Length - 1)] * 1000L);
+
+			_health = new RemoteSourceHealth(
+				state,
+				_health.LastSuccessAt,
+				exception.Message,
+				failures);
+			health = _health;
+		}
+
+		if (failures == 1)
+		{
+			_logger.Warning(
+				exception,
+				"The remote source {RemoteSource} could not be read; retrying with a backoff.",
+				_definition.Name);
+		}
+		else
+		{
+			_logger.Debug(
+				exception,
+				"The remote source {RemoteSource} is still unavailable.",
+				_definition.Name);
+		}
+
+		Publish(health, previous);
+	}
+
+	private void StopLoop()
+	{
+		CancellationTokenSource? cancellation;
+
+		lock (_sync)
+		{
+			cancellation = _loopCancellation;
+			_loopCancellation = null;
+			_loop = null;
+		}
+
+		cancellation?.Cancel();
+	}
+
+	private void Wake()
+	{
+		try
+		{
+			_wake.Release();
+		}
+		catch (SemaphoreFullException)
+		{
+			// A wake is already pending; one is enough.
+		}
+	}
+
+	private void Publish(RemoteSourceHealth health, RemoteSourceState previous)
+	{
+		// The event is only about a state transition, not every retry.
+		if (health.State == previous)
+		{
+			return;
+		}
+
+		try
+		{
+			RemoteHealthChanged?.Invoke(this, new RemoteHealthChangedEventArgs(Status()));
+		}
+		catch (Exception exception)
+		{
+			// A subscriber that throws must not turn a successful read into a failure or take the
+			// background loop down.
+			_logger.Debug(exception, "A remote health subscriber failed.");
+		}
+	}
+
+	private RemoteSourceStatus Status()
+	{
+		lock (_sync)
+		{
+			return new RemoteSourceStatus(_definition.Key, _definition.Name, _definition.Url, _health);
+		}
+	}
+
+	private bool Wanted(IReadOnlyCollection<string>? hardwareFilter) =>
+		hardwareFilter is not { Count: > 0 }
+		|| hardwareFilter.Any(_definition.MatchesHardwareFilter);
+
+	private TimeSpan SnapshotLifetime
+	{
+		get
+		{
+			var lifetime = _pollingInterval * 2;
+			return lifetime < MinimumSnapshotLifetime ? MinimumSnapshotLifetime : lifetime;
 		}
 	}
 

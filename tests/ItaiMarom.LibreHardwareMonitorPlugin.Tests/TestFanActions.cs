@@ -14,7 +14,13 @@ internal static class TestFanActions
 	/// pinned here rather than read off the actions under test, because an id is persisted in every button
 	/// that uses it and a test that followed a rename would never notice one.
 	/// </summary>
-	public static readonly string[] Ids = ["set-fan-speed", "restore-fan-control"];
+	public static readonly string[] Ids =
+	[
+		"set-fan-speed",
+		"restore-fan-control",
+		"restore-all-fans",
+		"rescan-hardware",
+	];
 
 	/// <summary>
 	/// A controllable sensor of the kind a super-I/O chip really exposes: a <see cref="SensorType.Control"/>

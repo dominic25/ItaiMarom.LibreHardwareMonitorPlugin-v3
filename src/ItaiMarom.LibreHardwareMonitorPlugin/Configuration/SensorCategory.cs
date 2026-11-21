@@ -117,7 +117,7 @@ internal sealed record SensorCategory(
 	/// branch above it already says which PC it is, so repeating the label on every device would only add
 	/// noise.
 	/// </summary>
-	private static string WithoutMachine(string rootName, string machineName)
+	internal static string WithoutMachine(string rootName, string machineName)
 	{
 		var prefix = machineName + RemoteSourceDefinition.NameSeparator;
 		return rootName.StartsWith(prefix, StringComparison.Ordinal)

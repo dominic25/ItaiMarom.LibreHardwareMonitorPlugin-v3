@@ -19,21 +19,24 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 /// <para>
 /// A remote that throws or times out is isolated. Its failure is logged and the local readings and every
 /// other remote still come back, which is what makes one unplugged machine an empty branch rather than a
-/// plugin that has stopped reading anything.
+/// plugin that has stopped reading anything. Each remote polls itself in the background, so its HTTP
+/// timeout never lands on this aggregate's caller.
 /// </para>
 /// </remarks>
 public sealed class AggregateHardwareSource :
 	IHardwareSensorSource,
 	IHardwareElevation,
 	IAccessNoteSource,
-	IRemoteSourceController
+	IRemoteSourceController,
+	IRemoteHealthSource
 {
 	private readonly IHardwareSensorSource _local;
 	private readonly ILogger _logger;
 	private readonly Func<RemoteSourceDefinition, IHardwareSensorSource> _remoteFactory;
 	private readonly object _sync = new();
 
-	private IReadOnlyList<IHardwareSensorSource> _remotes = [];
+	private IReadOnlyList<RemoteEntry> _remotes = [];
+	private bool _open;
 	private bool _disposed;
 
 	public AggregateHardwareSource(
@@ -46,6 +49,9 @@ public sealed class AggregateHardwareSource :
 			.ForContext<AggregateHardwareSource>();
 		_remoteFactory = remoteFactory ?? (definition => new RemoteHardwareSource(definition, _logger));
 	}
+
+	/// <inheritdoc />
+	public event EventHandler<RemoteHealthChangedEventArgs>? RemoteHealthChanged;
 
 	/// <inheritdoc />
 	public bool IsElevated => (_local as IHardwareElevation)?.IsElevated ?? false;
@@ -64,11 +70,44 @@ public sealed class AggregateHardwareSource :
 			"This hardware source cannot be elevated."));
 
 	/// <inheritdoc />
+	public Task<ElevationResult> DisableAsync(CancellationToken cancellationToken = default) =>
+		(_local as IHardwareElevation)?.DisableAsync(cancellationToken)
+		?? Task.FromResult(new ElevationResult(
+			ElevationOutcome.Failed,
+			"This hardware source cannot be elevated."));
+
+	/// <inheritdoc />
+	public IReadOnlyList<RemoteSourceStatus> RemoteStatuses
+	{
+		get
+		{
+			lock (_sync)
+			{
+				return [.. _remotes.Select(StatusOf)];
+			}
+		}
+	}
+
+	/// <inheritdoc />
+	public bool TryRetryRemote(string key)
+	{
+		lock (_sync)
+		{
+			var entry = _remotes.FirstOrDefault(remote =>
+				string.Equals(remote.Definition.Key, key, StringComparison.Ordinal));
+
+			return entry is not null
+				&& entry.Source is IRemoteHealthSource health
+				&& health.TryRetryRemote(key);
+		}
+	}
+
+	/// <inheritdoc />
 	public void ReplaceRemoteSources(IReadOnlyList<RemoteSourceDefinition> remotes)
 	{
 		ArgumentNullException.ThrowIfNull(remotes);
 
-		IReadOnlyList<IHardwareSensorSource> replaced;
+		IReadOnlyList<RemoteEntry> replaced;
 
 		lock (_sync)
 		{
@@ -76,9 +115,59 @@ public sealed class AggregateHardwareSource :
 
 			replaced = _remotes;
 			_remotes = remotes.Select(CreateRemote).ToArray();
+
+			foreach (var entry in _remotes)
+			{
+				if (entry.Source is IRemoteHealthSource health)
+				{
+					health.RemoteHealthChanged += OnRemoteHealthChanged;
+				}
+
+				// A list saved while the loop is running has to start its new machines now; waiting for
+				// the next Open would leave a newly added remote dark until a restart.
+				if (_open)
+				{
+					entry.Source.Open();
+				}
+			}
 		}
 
 		DisposeAll(replaced);
+	}
+
+	/// <inheritdoc />
+	public void SetPollingInterval(TimeSpan interval)
+	{
+		lock (_sync)
+		{
+			if (_disposed)
+			{
+				return;
+			}
+
+			_local.SetPollingInterval(interval);
+
+			foreach (var remote in _remotes)
+			{
+				remote.Source.SetPollingInterval(interval);
+			}
+		}
+	}
+
+	/// <inheritdoc />
+	public void Rescan()
+	{
+		lock (_sync)
+		{
+			ThrowIfDisposed();
+
+			_local.Rescan();
+
+			foreach (var remote in _remotes)
+			{
+				remote.Source.Rescan();
+			}
+		}
 	}
 
 	/// <inheritdoc />
@@ -87,7 +176,16 @@ public sealed class AggregateHardwareSource :
 		lock (_sync)
 		{
 			ThrowIfDisposed();
+
+			_open = true;
 			_local.Open();
+
+			// A remote reads itself in the background now, so its loop starts and stops with the aggregate
+			// rather than with the first Read. Opening is idempotent.
+			foreach (var remote in _remotes)
+			{
+				remote.Source.Open();
+			}
 		}
 	}
 
@@ -101,7 +199,13 @@ public sealed class AggregateHardwareSource :
 				return;
 			}
 
+			_open = false;
 			_local.Close();
+
+			foreach (var remote in _remotes)
+			{
+				remote.Source.Close();
+			}
 		}
 	}
 
@@ -118,7 +222,7 @@ public sealed class AggregateHardwareSource :
 			{
 				try
 				{
-					sensors.AddRange(remote.Read(hardwareFilter));
+					sensors.AddRange(remote.Source.Read(hardwareFilter));
 				}
 				catch (Exception exception)
 				{
@@ -165,7 +269,7 @@ public sealed class AggregateHardwareSource :
 	/// <inheritdoc />
 	public void Dispose()
 	{
-		IHardwareSensorSource[] remotes;
+		RemoteEntry[] remotes;
 
 		lock (_sync)
 		{
@@ -175,6 +279,7 @@ public sealed class AggregateHardwareSource :
 			}
 
 			_disposed = true;
+			_open = false;
 			remotes = [.. _remotes];
 			_remotes = [];
 		}
@@ -187,11 +292,11 @@ public sealed class AggregateHardwareSource :
 		_local.Dispose();
 	}
 
-	private IHardwareSensorSource CreateRemote(RemoteSourceDefinition definition)
+	private RemoteEntry CreateRemote(RemoteSourceDefinition definition)
 	{
 		try
 		{
-			return _remoteFactory(definition);
+			return new RemoteEntry(definition, _remoteFactory(definition));
 		}
 		catch (Exception exception)
 		{
@@ -200,23 +305,56 @@ public sealed class AggregateHardwareSource :
 				"The remote source {RemoteSource} could not be created; it is being skipped.",
 				definition.Name);
 
-			return new UnavailableRemoteSource();
+			return new RemoteEntry(definition, new UnavailableRemoteSource(definition));
 		}
 	}
 
-	private void DisposeAll(IEnumerable<IHardwareSensorSource> sources)
-	{
-		foreach (var source in sources)
-		{
-			Dispose(source);
-		}
-	}
+	private RemoteSourceStatus StatusOf(RemoteEntry entry) =>
+		entry.Source is IRemoteHealthSource health
+			? health.RemoteStatuses.FirstOrDefault(status =>
+				string.Equals(status.Key, entry.Definition.Key, StringComparison.Ordinal))
+				?? new RemoteSourceStatus(
+					entry.Definition.Key,
+					entry.Definition.Name,
+					entry.Definition.Url,
+					RemoteSourceHealth.Unknown)
+			: new RemoteSourceStatus(
+				entry.Definition.Key,
+				entry.Definition.Name,
+				entry.Definition.Url,
+				RemoteSourceHealth.Unknown);
 
-	private void Dispose(IHardwareSensorSource source)
+	private void OnRemoteHealthChanged(object? sender, RemoteHealthChangedEventArgs args)
 	{
 		try
 		{
-			source.Dispose();
+			RemoteHealthChanged?.Invoke(this, args);
+		}
+		catch (Exception exception)
+		{
+			// The remote's own loop is the caller; a notification that throws must not stop it.
+			_logger.Debug(exception, "A remote health subscriber failed.");
+		}
+	}
+
+	private void DisposeAll(IEnumerable<RemoteEntry> entries)
+	{
+		foreach (var entry in entries)
+		{
+			Dispose(entry);
+		}
+	}
+
+	private void Dispose(RemoteEntry entry)
+	{
+		if (entry.Source is IRemoteHealthSource health)
+		{
+			health.RemoteHealthChanged -= OnRemoteHealthChanged;
+		}
+
+		try
+		{
+			entry.Source.Dispose();
 		}
 		catch (Exception exception)
 		{
@@ -226,9 +364,41 @@ public sealed class AggregateHardwareSource :
 
 	private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
+	private sealed record RemoteEntry(RemoteSourceDefinition Definition, IHardwareSensorSource Source);
+
 	/// <summary>A remote that could not even be constructed, so a bad row cannot remove the rest.</summary>
-	private sealed class UnavailableRemoteSource : IHardwareSensorSource
+	private sealed class UnavailableRemoteSource : IHardwareSensorSource, IRemoteHealthSource
 	{
+		private readonly RemoteSourceDefinition _definition;
+
+		public UnavailableRemoteSource(RemoteSourceDefinition definition) => _definition = definition;
+
+		public event EventHandler<RemoteHealthChangedEventArgs>? RemoteHealthChanged
+		{
+			add
+			{
+			}
+			remove
+			{
+			}
+		}
+
+		public IReadOnlyList<RemoteSourceStatus> RemoteStatuses =>
+		[
+			new(
+				_definition.Key,
+				_definition.Name,
+				_definition.Url,
+				new RemoteSourceHealth(
+					RemoteSourceState.Offline,
+					null,
+					"The remote source could not be created.",
+					0)),
+		];
+
+		public bool TryRetryRemote(string key) =>
+			string.Equals(key, _definition.Key, StringComparison.Ordinal);
+
 		public void Open()
 		{
 		}

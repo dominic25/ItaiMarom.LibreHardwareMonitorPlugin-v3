@@ -184,7 +184,7 @@ public sealed class FanControlActionTests
 
 		IActionDefinition[] actions = [new SetFanSpeedAction(monitor, logger), new RestoreFanControlAction(monitor, logger)];
 
-		Assert.That(actions.Select(action => action.Id), Is.EqualTo(TestFanActions.Ids));
+		Assert.That(actions.Select(action => action.Id), Is.EqualTo(TestFanActions.Ids[..2]));
 		Assert.That(actions, Has.All.Matches<IActionDefinition>(
 			action => action.Parameters.Any(
 				parameter => parameter.Name == ControlAction.SensorParameterName && parameter.Required)));

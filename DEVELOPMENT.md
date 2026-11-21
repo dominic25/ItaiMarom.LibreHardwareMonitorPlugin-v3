@@ -52,7 +52,8 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     ControlRange.cs                    the span a sensor's software control accepts
     AggregateHardwareSource.cs         the local machine plus every configured remote one
     IRemoteSourceController.cs         the seam that replaces the remote list at run time
-    RemoteHardwareSource.cs            one remote machine's /data.json, with failure backoff
+    RemoteHealth.cs                     a remote's reachability, and the interface that reports it
+    RemoteHardwareSource.cs            one remote machine's /data.json, polled in the background
     RemoteSensorParser.cs              the tree the Remote Web Server publishes
     RemoteSourceAddress.cs             what the user typed, reduced to the data.json address
     RemoteSourceDefinition.cs          a remote machine's label, key and sensor identity
@@ -61,6 +62,8 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     ControlAction.cs                   what the fan actions share: sensor picker, options, executor
     SetFanSpeedAction.cs               set a controllable fan or pump to a percentage
     RestoreFanControlAction.cs         hand a fan or pump back to the motherboard's curve
+    RestoreAllFansAction.cs            hand every controllable fan back in one press
+    RescanHardwareAction.cs            re-read the hardware from a button
   Variables/
     SensorSelection.cs                 the sensors that become declared variables
     SensorVariable.cs                  a selected sensor and the name/id it is exposed under
@@ -82,6 +85,7 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     SensorCategory.cs                  the window's tree: machine, hardware, reading kind, sensors
   Issues/
     MissingReadingsIssueProvider.cs    the warning about readings the driver would answer with
+    RemoteHealthIssueProvider.cs       one issue per unreachable remote machine, with a retry
   manifest.json                        plugin identity, icon, entrypoints
   macrodeck-build.json                 per-RID publish recipe used by the CLI
   Assets/icon.svg                      plugin icon
@@ -106,6 +110,9 @@ a SMART query, so it is never touched from anything that serves the Macro Deck s
   reads a widget's variable at the configured rate instead of falling back to its own five-second default.
   The host polls its variables on a 250 ms tick, so that is the finest update a widget can see even when
   the loop itself runs faster; the value is still whatever the last poll cached.
+- The loop tells its source the interval through `SetPollingInterval`. The local source ignores it; a
+  remote source uses it as its own refresh rate, clamped to one second so an aggressive on-board interval
+  does not turn into an HTTP request every few milliseconds.
 
 ## How remote machines work
 
@@ -119,8 +126,25 @@ plus every configured remote one:
   on another PC is read-only by design.
 - **A remote failure is isolated.** A remote that throws or times out is logged and skipped, and the local
   readings and every other remote still come back. A remote also backs off on failure - one second, two,
-  four, up to a minute - because the polling seam is synchronous and a dead address must not delay every
-  local poll behind its timeout. A successful read resets the backoff.
+  four, up to a minute - and a successful read resets the backoff.
+- **The HTTP call is off the poll thread.** `RemoteHardwareSource.Open` starts a background loop; `Read`
+  returns the newest tree the loop published, or nothing once that snapshot has expired. A slow or
+  sleeping machine therefore cannot hold the local poll behind a five-second timeout. The loop is driven
+  by the interval from `HardwareMonitor.SetOptions`, clears its backoff with `TryRetryRemote`, and
+  re-fetches on `Rescan`.
+- **Health is its own state.** Every remote moves through `Unknown`, `Online`, `Degraded` (one or two
+  failures after a success) and `Offline` (three in a row). The state is exposed by
+  `IRemoteHealthSource`, which the integration reads for the `_online` and `_status` variables, the issue
+  list, the window badge and the transition notification. The `_online` variable is a Boolean and
+  `_status` is text, both declared for every configured remote whether or not a sensor is ticked.
+- **Recovery is automatic.** A notification is raised only on the transition to `Offline` for a machine
+  that has been online in this session, and is dismissed when it answers again. A machine that was asleep
+  at startup gets its issue but no notification. The issue's **Retry now** button clears the backoff, so
+  a user who just woke the PC does not wait out the minute.
+- **The password is not echoed.** The request still carries Basic Auth, but the settings page renders an
+  empty password field with a hidden "one is saved" marker; a blank field on save or on Test keeps the
+  stored value. The warning beside the field appears when a typed username would travel over plain
+  `http`.
 - **The address is forgiving.** `host:8085`, `http://host:8085`, and the full
   `http://host:8085/data.json` all normalize to the last form. Only `http` and `https` are accepted.
 - **Identity is namespaced by a key.** A remote's hardware and sensor ids carry `/remote/<key>/` in front,
@@ -228,9 +252,12 @@ LibreHardwareMonitor exposes a control on a sensor of its own - usually a `Contr
 RPM sensor on a super-I/O chip - and that control is only created when its kernel driver is loaded. The
 plugin therefore drives exactly the sensors that report one:
 
-- **Two actions.** **Set fan speed** takes a 0-100 slider and writes it as a software control; **Restore
-  fan control** returns the same sensor to the hardware's own curve. The undo matters: a software value
-  survives the plugin process, so without it a fan would keep a speed set once until the machine restarts.
+- **Three actions.** **Set fan speed** takes a 0-100 slider and writes it as a software control;
+  **Restore fan control** returns the same sensor to the hardware's own curve; **Restore all fans** does
+  that for every controllable sensor at once. The undo matters: a software value survives the plugin
+  process, so without it a fan would keep a speed set once until the machine restarts. The same reset
+  runs when the elevated helper is stopped, and - unless the window's box is cleared - from
+  `DisposeAsync`, so only a clean shutdown can perform it.
 - **The same fans are writable variables.** A sensor with a control is declared with `Write`, so Macro
   Deck's own **Slider** widget can bind to a declared variable or to a catalog binding and drive it
   two-way. The reading carries the control's reported range and a one-percent step, the drag commits on
@@ -252,6 +279,9 @@ plugin therefore drives exactly the sensors that report one:
   control's reported minimum and maximum before it is written. A chip that reports a range no slider can
   use - non-finite, reversed, or zero width - has no range to clamp against, and the request is left to
   the library.
+- **A rescan re-applies written speeds.** `Computer.Reset` rebuilds every control in its default mode, so
+  `HardwareMonitor` remembers the last software value per sensor and writes it again after the rebuild.
+  A fan that is gone is simply not re-applied; a fan that comes back with the same identity is.
 - **A missing fan is a result, not an exception.** A button saved against a fan that has since been
   removed returns `NOT_FOUND` with an explanation, so the flow engine reports a failure instead of a
   crashed action.
@@ -314,6 +344,13 @@ so the settings screen is the old dialog itself, served to the browser:
   built-in Slider widget can write to it. Every hardware and reading-kind branch above such a sensor carries
   a dashed `control below` marker, so a collapsed `Control` branch still points at what it holds; the branch
   marker is deliberately different from the sensor's, because a branch itself cannot be driven.
+- **Rescan hardware** in the toolbar re-enumerates the machine and swaps the tree in place; the page posts
+  its current form first, so unsaved ticks and the polling/elevation preferences survive the reload. A
+  configured machine with no readings keeps its branch with an **offline** badge, rather than disappearing
+  along with the sensors the badge would explain.
+- While the elevated helper is running, the toolbar says so and offers **Stop helper**. Stopping it hands
+  every software fan control back through the helper first, because the unelevated process cannot reach
+  those controls afterwards.
 - A `Control` sensor the hardware library attached no software control to says `read-only` instead, with a
   tooltip saying it can only be watched. The library creates those too - a graphics card's fan duty is one -
   so an unbadged sensor is never an unexplained gap in what the screen claims about the machine.
@@ -366,8 +403,8 @@ starts unelevated and moves the privilege into a helper it owns:
   enables the helper for the session and answers with where the setting lives - so the preference is only
   ever written by the settings window.
 - **The helper owns the hardware.** `HardwareHost` creates the only `Computer`, opens it, and serves a
-  narrow named-pipe protocol: `hello`, `open`, `close`, `read`, `controls`, `set`, `reset`, `ping` and
-  `stop`. `HardwareHostHandler` carries the requests out; a hardware failure is an answer for that
+  narrow named-pipe protocol: `hello`, `open`, `close`, `read`, `controls`, `rescan`, `set`, `reset`,
+  `ping` and `stop`. `HardwareHostHandler` carries the requests out; a hardware failure is an answer for that
   request, not a reason to end the helper.
 - **The plugin proxies the source.** `HardwareHostClient` is an `IHardwareSensorSource` whose calls
   travel down the pipe. `ElevatedHardwareSource` closes the local hardware before the helper opens it
@@ -383,6 +420,14 @@ starts unelevated and moves the privilege into a helper it owns:
 - **A helper that dies falls back.** A broken pipe drops back to the local source and the issue list
   offers elevation again. A write that was in flight is reported as a failure rather than silently
   retried locally, because the local process cannot reach the control.
+- **The helper can be stopped from the window.** `ElevatedHardwareSource.DisableAsync` asks the helper to
+  hand every software control back, closes the pipe, stops the process and reopens the local source. The
+  window shows an "Elevated readings are on" line with **Stop helper** only while the helper is running;
+  stopping it also tells the host the catalog changed, because the fans and driver-backed readings leave
+  with it.
+- **A rescan goes through the helper.** `rescan` is the one hardware operation that must run in the
+  elevated process when it is the one holding the hardware; `ElevatedHardwareSource.Rescan` forwards it,
+  then `HardwareMonitor` re-applies the written fan values.
 - **The helper cannot outlive the plugin.** The pipe closing ends it, it watches the parent process, and
   the plugin assigns it to a kill-on-close job object where Windows allows that. The job object is best
   effort: an unelevated process cannot always open an elevated one with the rights
@@ -495,6 +540,13 @@ Step-by-step port from the Macro Deck 2 plugin:
       `unit_defaults`, which every sensor without a choice of its own follows.
 - [x] One tree branch per remote machine - each machine's hardware grouped under it rather than beside
       local hardware, with the machine label not repeated on every device.
+- [x] Remote health - background polling, an online flag and a status text per machine, an offline badge,
+      one issue with **Retry now**, and one transition notification.
+- [x] Rescan - a button in the sensor window and an action, re-applying software fan speeds afterwards.
+- [x] Fan safety - **Restore all fans**, and restore-on-exit by default.
+- [x] Elevation control - **Stop helper** in the window, handing the fans back first, plus an
+      `elevated_readings` variable.
+- [x] Remote credentials are no longer echoed back into the settings page, with an http warning.
 
 ## Maybe
 

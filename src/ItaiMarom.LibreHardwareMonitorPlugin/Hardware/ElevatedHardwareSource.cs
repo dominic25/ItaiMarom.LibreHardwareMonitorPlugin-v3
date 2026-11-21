@@ -129,6 +129,70 @@ internal sealed class ElevatedHardwareSource : IHardwareSensorSource, IHardwareE
 		}
 	}
 
+	/// <summary>
+	/// Stops the helper and reads this process's own hardware again. Every software fan control is handed
+	/// back through the helper first: once it is gone, this process cannot reach those controls, so a fan
+	/// left at a written value would stay there with nobody able to undo it.
+	/// </summary>
+	public async Task<ElevationResult> DisableAsync(CancellationToken cancellationToken = default)
+	{
+		await _enabling.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+		try
+		{
+			HardwareHostConnection? connection;
+			string? localError = null;
+
+			lock (_sync)
+			{
+				if (_disposed)
+				{
+					return new ElevationResult(ElevationOutcome.Failed, "The plugin is shutting down.");
+				}
+
+				connection = _connection;
+				if (connection is null)
+				{
+					return new ElevationResult(ElevationOutcome.Disabled);
+				}
+
+				ResetRemoteControls(connection);
+
+				_connection = null;
+				_remoteOpen = false;
+				_elevatedAccessNote = null;
+
+				try
+				{
+					_local.Open();
+					_localOpen = true;
+				}
+				catch (Exception exception)
+				{
+					_logger.Debug(exception, "The local hardware could not be opened after the helper stopped.");
+					localError = exception.Message;
+				}
+			}
+
+			try
+			{
+				connection.Dispose();
+			}
+			catch (Exception exception)
+			{
+				_logger.Debug(exception, "The elevated hardware helper did not stop cleanly.");
+			}
+
+			_logger.Information("The elevated hardware helper was stopped.");
+
+			return new ElevationResult(ElevationOutcome.Disabled, localError);
+		}
+		finally
+		{
+			_enabling.Release();
+		}
+	}
+
 	/// <inheritdoc />
 	public void Open()
 	{
@@ -150,6 +214,46 @@ internal sealed class ElevatedHardwareSource : IHardwareSensorSource, IHardwareE
 			}
 
 			EnsureLocalOpen();
+		}
+	}
+
+	/// <inheritdoc />
+	public void SetPollingInterval(TimeSpan interval)
+	{
+		lock (_sync)
+		{
+			if (_disposed)
+			{
+				return;
+			}
+
+			_local.SetPollingInterval(interval);
+		}
+	}
+
+	/// <inheritdoc />
+	public void Rescan()
+	{
+		lock (_sync)
+		{
+			ThrowIfDisposed();
+
+			if (_connection is { } connection)
+			{
+				try
+				{
+					EnsureRemoteOpen(connection);
+					connection.Source.Rescan();
+					return;
+				}
+				catch (Exception exception) when (IsTransportFailure(exception))
+				{
+					DropRemote(connection);
+				}
+			}
+
+			EnsureLocalOpen();
+			_local.Rescan();
 		}
 	}
 
@@ -421,6 +525,37 @@ internal sealed class ElevatedHardwareSource : IHardwareSensorSource, IHardwareE
 		finally
 		{
 			_localOpen = false;
+		}
+	}
+
+	/// <summary>
+	/// Hands every software control back through the helper. Failures are logged rather than raised: the
+	/// helper is about to be closed either way, and refusing to stop because one fan did not answer would
+	/// leave the user with no way back to the limited mode.
+	/// </summary>
+	private void ResetRemoteControls(HardwareHostConnection connection)
+	{
+		IReadOnlyList<SensorIdentifier> controls;
+		try
+		{
+			controls = connection.Source.ReadControls();
+		}
+		catch (Exception exception)
+		{
+			_logger.Debug(exception, "The elevated helper could not list its controls before stopping.");
+			return;
+		}
+
+		foreach (var control in controls)
+		{
+			try
+			{
+				connection.Source.ResetControl(control.Id);
+			}
+			catch (Exception exception)
+			{
+				_logger.Debug(exception, "The control of {SensorId} could not be handed back before stopping.", control.Id);
+			}
 		}
 	}
 

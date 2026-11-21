@@ -125,6 +125,24 @@ public sealed class AggregateHardwareSourceTests
 	}
 
 	[Test]
+	public void Opening_the_aggregate_opens_every_remote()
+	{
+		var local = new FakeHardwareSensorSource();
+		var remote = new StubRemote();
+		using var logger = new LoggerConfiguration().CreateLogger();
+		using var aggregate = new AggregateHardwareSource(local, logger, _ => remote);
+
+		aggregate.ReplaceRemoteSources([LivingRoom]);
+		aggregate.Open();
+
+		Assert.That(remote.Opened, Is.True);
+
+		aggregate.Close();
+
+		Assert.That(remote.Closed, Is.True);
+	}
+
+	[Test]
 	public void The_local_access_note_is_forwarded()
 	{
 		var local = new FakeHardwareSensorSource { AccessNote = "some readings are missing" };
@@ -156,13 +174,13 @@ public sealed class AggregateHardwareSourceTests
 
 		public bool Disposed { get; private set; }
 
-		public void Open()
-		{
-		}
+		public bool Opened { get; private set; }
 
-		public void Close()
-		{
-		}
+		public bool Closed { get; private set; }
+
+		public void Open() => Opened = true;
+
+		public void Close() => Closed = true;
 
 		public IReadOnlyList<HardwareSensor> Read(IReadOnlyCollection<string>? hardwareFilter)
 		{

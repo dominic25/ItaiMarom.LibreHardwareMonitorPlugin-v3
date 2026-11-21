@@ -11,6 +11,9 @@ public enum ElevationOutcome
 
 	/// <summary>The helper could not be started, or could not open the hardware.</summary>
 	Failed,
+
+	/// <summary>The helper was asked to stop and the plugin is reading this machine's own hardware again.</summary>
+	Disabled,
 }
 
 /// <summary>The result of one request for elevated readings.</summary>
@@ -54,6 +57,12 @@ public interface IHardwareElevation
 	/// an exception: the plugin keeps the readings it already has.
 	/// </summary>
 	Task<ElevationResult> EnableAsync(CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Stops the elevated helper and goes back to this process's own hardware. Software fan control is
+	/// handed back before the helper goes away, because the local process cannot reach those controls.
+	/// </summary>
+	Task<ElevationResult> DisableAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

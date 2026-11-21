@@ -120,6 +120,9 @@ internal sealed class HardwareHostClient : IHardwareSensorSource, IAccessNoteSou
 	}
 
 	/// <inheritdoc />
+	public void Rescan() => Send(new HardwareHostRequest { Type = "rescan" });
+
+	/// <inheritdoc />
 	public IReadOnlyList<SensorIdentifier> ReadControls()
 	{
 		var response = Send(new HardwareHostRequest { Type = "controls" });

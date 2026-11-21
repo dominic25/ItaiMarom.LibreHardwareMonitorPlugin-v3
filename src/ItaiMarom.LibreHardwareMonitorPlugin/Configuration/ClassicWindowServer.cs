@@ -50,7 +50,10 @@ internal sealed record ClassicWindowOpening(
 	bool AutoElevate = false,
 	IReadOnlyList<RemoteSourceDefinition>? RemoteSources = null,
 	IReadOnlyDictionary<string, SensorUnit>? DisplayUnits = null,
-	IReadOnlyDictionary<SensorType, SensorUnit>? UnitDefaults = null);
+	IReadOnlyDictionary<SensorType, SensorUnit>? UnitDefaults = null,
+	bool RestoreFansOnExit = true,
+	bool Elevated = false,
+	IReadOnlyDictionary<string, RemoteSourceStatus>? RemoteHealth = null);
 
 /// <summary>One remote machine as the window's form carried it back, before it is validated.</summary>
 internal sealed record ClassicWindowRemote(string? Name, string? Url, string? Key, string? UserName = null, string? Password = null);
@@ -67,7 +70,8 @@ internal sealed record ClassicWindowPayload(
 	/// should be cleared.
 	/// </summary>
 	IReadOnlyDictionary<string, SensorUnit?>? Units = null,
-	IReadOnlyDictionary<SensorType, SensorUnit>? DefaultUnits = null);
+	IReadOnlyDictionary<SensorType, SensorUnit>? DefaultUnits = null,
+	bool RestoreFansOnExit = true);
 
 /// <summary>
 /// A loopback-only web server with one job: serve the Macro Deck 2 dialog rebuilt as a page, and collect
@@ -106,6 +110,8 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	/// <summary>Where the page asks for the readings it is showing, one refresh at a time.</summary>
 	private const string ValuesPath = "/values";
 	private const string TestRemotePath = "/test-remote";
+	private const string RescanPath = "/rescan";
+	private const string StopHelperPath = "/stop-helper";
 
 	private const string HeaderTerminator = "\r\n\r\n";
 
@@ -113,6 +119,9 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 	private readonly ILogger _logger;
 	private readonly ISensorReadingSource _readings;
+	private readonly IHardwareElevation? _elevation;
+	private readonly Func<ClassicWindowOpening, CancellationToken, Task<ClassicWindowOpening>>? _rebuild;
+	private readonly Action? _elevationChanged;
 	private readonly object _sync = new();
 	private readonly Dictionary<string, Session> _sessions = new(StringComparer.Ordinal);
 
@@ -122,16 +131,24 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	private Uri? _baseUri;
 	private bool _disposed;
 
-	public ClassicWindowServer(ILogger logger, ISensorReadingSource readings)
+	public ClassicWindowServer(
+		ILogger logger,
+		ISensorReadingSource readings,
+		IHardwareElevation? elevation = null,
+		Func<ClassicWindowOpening, CancellationToken, Task<ClassicWindowOpening>>? rebuild = null,
+		Action? elevationChanged = null)
 	{
 		_logger = (logger ?? throw new ArgumentNullException(nameof(logger)))
 			.ForContext<ClassicWindowServer>();
 		_readings = readings ?? throw new ArgumentNullException(nameof(readings));
+		_elevation = elevation;
+		_rebuild = rebuild;
+		_elevationChanged = elevationChanged;
 	}
 
 	private sealed class Session
 	{
-		public required ClassicWindowOpening Opening { get; init; }
+		public required ClassicWindowOpening Opening { get; set; }
 
 		public ClassicWindowPayload? Payload { get; set; }
 
@@ -405,8 +422,22 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		if (IsTestRemoteRequest(request))
 		{
 			_logger.Debug("Test remote request: {Target}", request.Target);
-			return key is not null && TryGetSession(key, out _)
-				? await TestRemoteAsync(request, cancellationToken).ConfigureAwait(false)
+			return key is not null && TryGetSession(key, out var session)
+				? await TestRemoteAsync(session, request, cancellationToken).ConfigureAwait(false)
+				: ClosedWindow();
+		}
+
+		if (IsRescanRequest(request))
+		{
+			return key is not null && TryGetSession(key, out var session)
+				? await RescanAsync(session, request, cancellationToken).ConfigureAwait(false)
+				: ClosedWindow();
+		}
+
+		if (IsStopHelperRequest(request))
+		{
+			return key is not null && TryGetSession(key, out var session)
+				? await StopHelperAsync(session, cancellationToken).ConfigureAwait(false)
 				: ClosedWindow();
 		}
 
@@ -423,11 +454,24 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		&& (string.Equals(request.Target, TestRemotePath, StringComparison.Ordinal)
 			|| request.Target.StartsWith(TestRemotePath + "?", StringComparison.Ordinal));
 
+	private static bool IsRescanRequest(HttpRequest request) =>
+		string.Equals(request.Method, "POST", StringComparison.OrdinalIgnoreCase)
+		&& (string.Equals(request.Target, RescanPath, StringComparison.Ordinal)
+			|| request.Target.StartsWith(RescanPath + "?", StringComparison.Ordinal));
+
+	private static bool IsStopHelperRequest(HttpRequest request) =>
+		string.Equals(request.Method, "POST", StringComparison.OrdinalIgnoreCase)
+		&& (string.Equals(request.Target, StopHelperPath, StringComparison.Ordinal)
+			|| request.Target.StartsWith(StopHelperPath + "?", StringComparison.Ordinal));
+
 	/// <summary>
 	/// Tests a remote connection by making a request to the provided URL with optional credentials.
 	/// Returns a JSON response indicating success or failure, and on success includes the sensor list.
 	/// </summary>
-	private async Task<HttpResponse> TestRemoteAsync(HttpRequest request, CancellationToken cancellationToken)
+	private async Task<HttpResponse> TestRemoteAsync(
+		Session session,
+		HttpRequest request,
+		CancellationToken cancellationToken)
 	{
 		var form = ParseForm(request.Body);
 		var url = form.TryGetValue("url", out var urls) && urls.Count > 0 ? urls[0] : null;
@@ -435,6 +479,15 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		var userName = form.TryGetValue("username", out var users) && users.Count > 0 ? users[0] : null;
 		var password = form.TryGetValue("password", out var passes) && passes.Count > 0 ? passes[0] : null;
 		var key = form.TryGetValue("key", out var keys) && keys.Count > 0 ? keys[0] : null;
+
+		// The page no longer carries the saved password back to the browser. Testing an edited row with
+		// an empty field therefore has to use the password the window already holds.
+		if (string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(key))
+		{
+			password = session.Opening.RemoteSources?
+				.FirstOrDefault(remote => string.Equals(remote.Key, key, StringComparison.Ordinal))
+				?.Password;
+		}
 
 		if (string.IsNullOrWhiteSpace(url))
 		{
@@ -490,7 +543,9 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 					resourceId = s.Sensor.ResourceId,
 					name = s.Sensor.SensorName,
 					type = s.Sensor.SensorType.ToString(),
-					hardware = s.Sensor.Hardware.RootName,
+					// The machine branch the page adds already names the PC, so the hardware under it is
+					// not qualified a second time - exactly as a reopened window renders it.
+					hardware = SensorCategory.WithoutMachine(s.Sensor.Hardware.RootName, definition!.Name),
 					hardwarePath = s.Sensor.Hardware.Path,
 					value = s.Value?.ToString("F1", CultureInfo.InvariantCulture),
 					controllable = s.Sensor.Controllable
@@ -539,6 +594,91 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		{
 			return Array.Empty<HardwareSensor>();
 		}
+	}
+
+	/// <summary>
+	/// Re-enumerates the hardware behind this window and swaps the tree it is showing for the rebuilt one.
+	/// The page reloads afterwards, so the new devices are what the user ticks.
+	/// </summary>
+	private async Task<HttpResponse> RescanAsync(
+		Session session,
+		HttpRequest request,
+		CancellationToken cancellationToken)
+	{
+		if (_rebuild is null)
+		{
+			return JsonResponse(new { ok = false, message = "This window cannot rescan the hardware." });
+		}
+
+		var before = session.Opening.Categories.Sum(category => category.Sensors.Count);
+		var form = ParseForm(request.Body);
+
+		try
+		{
+			var rebuilt = await _rebuild(session.Opening, cancellationToken).ConfigureAwait(false);
+
+			// The page posted its form, so unsaved ticks and the two preferences survive the reload. The
+			// readings and the tree itself come from the rebuild; nothing here changes what was read.
+			if (form.Count > 0)
+			{
+				rebuilt = rebuilt with
+				{
+					SelectedResourceIds = ValuesOf(form, "sensors")
+						.Where(resourceId => !string.IsNullOrWhiteSpace(resourceId))
+						.Distinct(StringComparer.Ordinal)
+						.ToArray(),
+					PollingMilliseconds = ReadPolling(form) ?? rebuilt.PollingMilliseconds,
+					AutoElevate = form.ContainsKey("auto_elevate"),
+					RestoreFansOnExit = form.ContainsKey("restore_fans"),
+				};
+			}
+
+			session.Opening = rebuilt;
+
+			var after = rebuilt.Categories.Sum(category => category.Sensors.Count);
+
+			return JsonResponse(new
+			{
+				ok = true,
+				sensors = after,
+				added = Math.Max(0, after - before),
+				removed = Math.Max(0, before - after),
+			});
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (Exception exception)
+		{
+			_logger.Warning(exception, "The sensor window could not rescan the hardware.");
+			return JsonResponse(new { ok = false, message = "The hardware could not be re-read." });
+		}
+	}
+
+	/// <summary>Stops the elevated helper and goes back to this process's own readings.</summary>
+	private async Task<HttpResponse> StopHelperAsync(Session session, CancellationToken cancellationToken)
+	{
+		if (_elevation is not { IsElevated: true } elevation)
+		{
+			return JsonResponse(new { ok = false, message = "No elevated helper is running." });
+		}
+
+		var result = await elevation.DisableAsync(cancellationToken).ConfigureAwait(false);
+
+		if (result.Outcome != ElevationOutcome.Disabled)
+		{
+			return JsonResponse(new
+			{
+				ok = false,
+				message = result.Error ?? "The elevated helper could not be stopped.",
+			});
+		}
+
+		session.Opening = session.Opening with { Elevated = false };
+		_elevationChanged?.Invoke();
+
+		return JsonResponse(new { ok = true });
 	}
 
 	private static HttpResponse JsonResponse(object payload)
@@ -614,9 +754,10 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 			// A checkbox is submitted only while it is ticked, so its presence is the whole answer.
 			form.ContainsKey("auto_elevate"),
-			ReadRemotes(form),
+			ReadRemotes(session, form),
 			ReadUnits(form),
-			ReadDefaultUnits(form));
+			ReadDefaultUnits(form),
+			form.ContainsKey("restore_fans"));
 
 		_logger.Information(
 			"The classic sensor window saved {SensorCount} sensors.",
@@ -667,15 +808,22 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 	/// the empty line the editor starts a new remote in, so it is dropped rather than treated as a
 	/// configuration error the user has to clear.
 	/// </summary>
-	private static List<ClassicWindowRemote> ReadRemotes(Dictionary<string, List<string>> form)
+	private static List<ClassicWindowRemote> ReadRemotes(Session session, Dictionary<string, List<string>> form)
 	{
 		var names = ValuesOf(form, "remote_name");
 		var urls = ValuesOf(form, "remote_url");
 		var usernames = ValuesOf(form, "remote_username");
 		var passwords = ValuesOf(form, "remote_password");
+		var hasPasswords = ValuesOf(form, "remote_has_password");
 		var keys = ValuesOf(form, "remote_key");
 
-		var count = Math.Max(names.Count, Math.Max(urls.Count, Math.Max(usernames.Count, Math.Max(passwords.Count, keys.Count))));
+		var count = Math.Max(
+			names.Count,
+			Math.Max(
+				urls.Count,
+				Math.Max(
+					usernames.Count,
+					Math.Max(passwords.Count, Math.Max(hasPasswords.Count, keys.Count)))));
 		var remotes = new List<ClassicWindowRemote>(count);
 
 		for (var index = 0; index < count; index++)
@@ -686,12 +834,26 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 				continue;
 			}
 
+			var key = At(keys, index);
+			var password = At(passwords, index);
+
+			// A blank field means "keep the saved password", not "remove it". The password never travels
+			// back to the browser, so the only way the page can say it kept one is the hidden marker.
+			if (string.IsNullOrEmpty(password)
+				&& string.Equals(At(hasPasswords, index), "1", StringComparison.Ordinal)
+				&& !string.IsNullOrEmpty(key))
+			{
+				password = session.Opening.RemoteSources?
+					.FirstOrDefault(remote => string.Equals(remote.Key, key, StringComparison.Ordinal))
+					?.Password;
+			}
+
 			remotes.Add(new ClassicWindowRemote(
 				At(names, index),
 				url,
-				At(keys, index),
+				key,
 				At(usernames, index),
-				At(passwords, index)));
+				password));
 		}
 
 		return remotes;

@@ -36,6 +36,12 @@ public static class SensorVariableNaming
 	private const string NamePrefix = "";
 #endif
 
+	/// <summary>
+	/// The prefix the test build puts on every declared name. Extra variables - a remote's health, the
+	/// elevation flag - have to carry it too, or the test package would collide with the store one.
+	/// </summary>
+	internal static string Prefix => NamePrefix;
+
 	/// <summary>Assigns a unique name and id to every sensor in <paramref name="sensors"/>.</summary>
 	public static IReadOnlyList<SensorVariable> Assign(IEnumerable<SensorIdentifier> sensors)
 	{

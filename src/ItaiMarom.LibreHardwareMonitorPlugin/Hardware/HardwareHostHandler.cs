@@ -39,6 +39,7 @@ internal sealed class HardwareHostHandler : IDisposable
 				"close" => Close(),
 				"read" => Read(request.Filter),
 				"controls" => Controls(),
+				"rescan" => Rescan(),
 				"set" => Set(request.SensorId, request.Value),
 				"reset" => Reset(request.SensorId),
 				"ping" => new HardwareHostResponse { Ok = true },
@@ -139,6 +140,17 @@ internal sealed class HardwareHostHandler : IDisposable
 				Controls = [.. controls.Select(SensorIdentifierDto.From)],
 			};
 		}
+	}
+
+	private HardwareHostResponse Rescan()
+	{
+		lock (_sync)
+		{
+			EnsureOpen();
+			_source.Rescan();
+		}
+
+		return new HardwareHostResponse { Ok = true };
 	}
 
 	private HardwareHostResponse Set(string? sensorId, float value)

@@ -61,12 +61,24 @@ public sealed class LibreHardwareMonitorIntegration :
 	private readonly SensorSelection _selection;
 	private readonly SensorVariableProvider _variables;
 	private readonly MissingReadingsIssueProvider _issues;
+	private readonly RemoteHealthIssueProvider _remoteIssues;
 	private readonly IHardwareElevation? _elevation;
 	private readonly IRemoteSourceController? _remoteSources;
+	private readonly IRemoteHealthSource? _remoteHealth;
 	private readonly RemoteSourceSelection _remoteSelection;
 	private readonly IPluginCatalogNotifier _catalogNotifier;
 	private readonly ClassicWindowServer _window;
 	private readonly ILogger _logger;
+
+	/// <summary>
+	/// Whether every software fan control is handed back when this process stops. On unless the user
+	/// cleared the box: a fan left at a written speed with nothing able to undo it is the failure the
+	/// preference exists to avoid.
+	/// </summary>
+	private volatile bool _restoreFansOnExit = true;
+
+	/// <summary>Set once, because the health source outlives every reconnect.</summary>
+	private int _healthSubscribed;
 
 	/// <summary>
 	/// The host's variable surface, captured at initialize so a write can ask it to re-read a definition.
@@ -112,6 +124,7 @@ public sealed class LibreHardwareMonitorIntegration :
 		// The aggregate source is also the place a remote list can be changed at run time. A fake source
 		// in a test does not have one, and then a saved remote list simply has nothing to reach.
 		_remoteSources = source as IRemoteSourceController;
+		_remoteHealth = source as IRemoteHealthSource;
 		_remoteSelection = remoteSelection ?? new RemoteSourceSelection();
 
 		// The diagnosis has to see the source: once a helper is serving the hardware, this process
@@ -119,18 +132,31 @@ public sealed class LibreHardwareMonitorIntegration :
 		// counts.
 		_hardware = new HardwareMonitor(source, HardwareMonitorOptions.Default, _logger, diagnosis);
 		_selection = selection ?? throw new ArgumentNullException(nameof(selection));
-		_variables = new SensorVariableProvider(_hardware, selection);
+		_variables = new SensorVariableProvider(
+			_hardware,
+			selection,
+			_remoteSelection,
+			_remoteHealth,
+			_elevation);
 		_issues = new MissingReadingsIssueProvider(diagnosis, _elevation);
+		_remoteIssues = new RemoteHealthIssueProvider(_remoteHealth);
 		Actions =
 		[
 			new SetFanSpeedAction(_hardware, _logger),
 			new RestoreFanControlAction(_hardware, _logger),
+			new RestoreAllFansAction(_hardware, _logger),
+			new RescanHardwareAction(_hardware, _logger),
 		];
 
 		// The classic sensor window is served for the whole life of the plugin rather than for one
 		// session: a flow is handed out per session and has nowhere to release it, and the listener binds
 		// its port lazily, so a plugin nobody configures never listens at all.
-		_window = new ClassicWindowServer(_logger, new SensorReadingSource(_hardware, selection));
+		_window = new ClassicWindowServer(
+			_logger,
+			new SensorReadingSource(_hardware, selection),
+			_elevation,
+			RebuildWindowAsync,
+			NotifyElevationChanged);
 		Migrations = [new MacroDeck2Migration(_hardware, _logger)];
 	}
 
@@ -154,7 +180,10 @@ public sealed class LibreHardwareMonitorIntegration :
 			_window,
 			_logger,
 			_autoElevate,
-			_remoteSelection);
+			_remoteSelection,
+			_restoreFansOnExit,
+			_elevation,
+			_remoteHealth);
 
 	/// <inheritdoc />
 	public IReadOnlyList<IActionDefinition> Actions { get; }
@@ -218,7 +247,8 @@ public sealed class LibreHardwareMonitorIntegration :
 	/// The one issue this plugin can raise, asked when the host asks rather than remembered from start-up.
 	/// </summary>
 	public Task<IReadOnlyList<IntegrationIssue>> GetIssuesAsync(CancellationToken cancellationToken = default) =>
-		Task.FromResult(_issues.Issues());
+		Task.FromResult<IReadOnlyList<IntegrationIssue>>(
+			[.. _issues.Issues(), .. _remoteIssues.Issues()]);
 
 	/// <summary>
 	/// The answer to the issue's button. When elevation is what is missing, this is where the helper is
@@ -230,6 +260,11 @@ public sealed class LibreHardwareMonitorIntegration :
 		string issueId,
 		CancellationToken cancellationToken = default)
 	{
+		if (RemoteHealthIssueProvider.Owns(issueId))
+		{
+			return _remoteIssues.Retry(issueId);
+		}
+
 		if (issueId != MissingReadingsIssueProvider.IssueId)
 		{
 			return MissingReadingsIssueProvider.Unknown();
@@ -300,6 +335,17 @@ public sealed class LibreHardwareMonitorIntegration :
 		_hardware.SetOptions(PollingOptions(migrated.PollingInterval));
 		_autoElevate = migrated.AutoElevate == true;
 
+		// An absent preference is "on": the migration and any document written before the checkbox existed
+		// never answered the question, and restoring is the safer answer.
+		_restoreFansOnExit = migrated.RestoreFansOnExit ?? true;
+
+		// The remote sources are replaced on every initialize; the aggregate forwards their events, so
+		// this subscription survives that replacement and only has to be made once.
+		if (_remoteHealth is not null && Interlocked.Exchange(ref _healthSubscribed, 1) == 0)
+		{
+			_remoteHealth.RemoteHealthChanged += OnRemoteHealthChanged;
+		}
+
 		// The aggregate source is the only reader that can reach a remote machine, and a saved remote list
 		// has to be in place before the first poll: waiting for the next start would leave a new remote's
 		// sensors missing until the user restarted Macro Deck.
@@ -359,7 +405,31 @@ public sealed class LibreHardwareMonitorIntegration :
 		// The window stops listening first: it can hand a selection to a flow, and a flow that is still
 		// running when the loop is torn down has nothing left to read.
 		await _window.DisposeAsync().ConfigureAwait(false);
+
+		if (_remoteHealth is not null && Interlocked.Exchange(ref _healthSubscribed, 0) == 1)
+		{
+			_remoteHealth.RemoteHealthChanged -= OnRemoteHealthChanged;
+		}
+
 		_variables.Dispose();
+
+		// Only a real shutdown reaches this, not the stop-and-start of a reconnect. The fans are handed
+		// back while the source - local or the elevated helper - can still reach them.
+		if (_restoreFansOnExit && Volatile.Read(ref _initialized) != 0)
+		{
+			try
+			{
+				var reset = await _hardware.ResetAllControlsAsync(CancellationToken.None).ConfigureAwait(false);
+				_logger.Information(
+					"{ResetCount} fan controls were handed back as the plugin stopped.",
+					reset.Reset);
+			}
+			catch (Exception exception)
+			{
+				_logger.Warning(exception, "The fan controls could not be handed back as the plugin stopped.");
+			}
+		}
+
 		await _hardware.DisposeAsync().ConfigureAwait(false);
 	}
 
@@ -412,6 +482,73 @@ public sealed class LibreHardwareMonitorIntegration :
 		catch (Exception exception)
 		{
 			_logger.Warning(exception, "The elevated hardware helper could not be started at startup.");
+		}
+	}
+
+	/// <summary>
+	/// Rebuilds the tree the sensor window is showing after a rescan, so a device that was just attached
+	/// can be ticked without closing and reopening the window.
+	/// </summary>
+	private async Task<ClassicWindowOpening> RebuildWindowAsync(
+		ClassicWindowOpening current,
+		CancellationToken cancellationToken)
+	{
+		var rescan = await _hardware.RescanAsync(cancellationToken).ConfigureAwait(false);
+		var samples = rescan.Sensors;
+		var units = SensorReadingSource.UnitsOf(_selection);
+
+		return current with
+		{
+			Categories = SensorCategory.Build(
+				[.. samples.Select(sample => sample.Sensor)],
+				_remoteSelection.Remotes),
+			Values = SensorReadingSource.ValuesOf(samples, units, _selection.UnitDefaults),
+			SelectedResourceIds = _selection.Sensors
+				.Select(sensor => sensor.ResourceId)
+				.Distinct(StringComparer.Ordinal)
+				.ToArray(),
+			RemoteSources = _remoteSelection.Remotes,
+			DisplayUnits = units,
+			UnitDefaults = _selection.UnitDefaults,
+			Elevated = _elevation?.IsElevated ?? false,
+			RemoteHealth = _remoteHealth?.RemoteStatuses.ToDictionary(
+				status => status.Key,
+				StringComparer.Ordinal),
+			PollingMilliseconds = _hardware.Options.PollingInterval.TotalMilliseconds,
+		};
+	}
+
+	/// <summary>
+	/// The helper starting or stopping changes what the catalog can offer - the driver-backed readings and
+	/// the fans - and the host described this plugin before either state existed.
+	/// </summary>
+	private void NotifyElevationChanged()
+	{
+		// Stopping the helper handed every control back. The values the monitor remembered are no longer
+		// in effect, so a later rescan must not write them again.
+		_hardware.ForgetSoftwareControls();
+		_catalogNotifier.CatalogChanged(CapabilityKinds.Variables, reason: "elevated readings");
+	}
+
+	/// <summary>
+	/// Raises one notification when a machine that was online goes offline, and dismisses it when it comes
+	/// back. A machine that was never online has its issue but no notification: starting Macro Deck while a
+	/// PC is asleep is information, not an event.
+	/// </summary>
+	private void OnRemoteHealthChanged(object? sender, RemoteHealthChangedEventArgs args)
+	{
+		var status = args.Status;
+
+		if (status.Health.State == RemoteSourceState.Offline)
+		{
+			if (status.Health.HasBeenOnline)
+			{
+				Volatile.Read(ref _notifications)?.Notify(RemoteHealthIssueProvider.Notification(status));
+			}
+		}
+		else if (status.Health.State == RemoteSourceState.Online)
+		{
+			Volatile.Read(ref _notifications)?.Dismiss(RemoteHealthIssueProvider.IssueId(status.Key));
 		}
 	}
 

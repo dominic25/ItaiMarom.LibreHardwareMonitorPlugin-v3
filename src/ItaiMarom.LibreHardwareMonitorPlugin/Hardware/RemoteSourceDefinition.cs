@@ -17,7 +17,8 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 /// <para>
 /// Optional HTTP Basic Auth credentials for the remote server. When provided, every request includes
 /// an <c>Authorization: Basic</c> header. The password is stored in the plugin configuration and is
-/// transmitted only to the configured remote address over HTTPS (or HTTP on a trusted LAN).
+/// transmitted only to the configured remote address over HTTPS (or HTTP on a trusted LAN, which the
+/// settings page warns about). It is never sent back to the settings page.
 /// </para>
 /// </remarks>
 public sealed record RemoteSourceDefinition(string Name, string Url, string Key, string? UserName = null, string? Password = null)

@@ -30,6 +30,9 @@ internal sealed class FakeElevatableSource : IHardwareSensorSource, IHardwareEle
 	/// <summary>How many times the issue's button asked for a helper.</summary>
 	public int EnableCount { get; private set; }
 
+	/// <summary>How many times the window asked to go back to the limited mode.</summary>
+	public int DisableCount { get; private set; }
+
 	/// <inheritdoc />
 	public bool IsElevated { get; private set; }
 
@@ -48,6 +51,15 @@ internal sealed class FakeElevatableSource : IHardwareSensorSource, IHardwareEle
 		}
 
 		return Task.FromResult(NextResult);
+	}
+
+	/// <inheritdoc />
+	public Task<ElevationResult> DisableAsync(CancellationToken cancellationToken = default)
+	{
+		DisableCount++;
+		IsElevated = false;
+		ElevatedAccessNote = null;
+		return Task.FromResult(new ElevationResult(ElevationOutcome.Disabled));
 	}
 
 	/// <inheritdoc />

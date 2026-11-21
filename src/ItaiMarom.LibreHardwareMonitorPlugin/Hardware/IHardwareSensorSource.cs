@@ -20,6 +20,23 @@ public interface IHardwareSensorSource : IDisposable
 	void Close();
 
 	/// <summary>
+	/// Tells the source how often the loop intends to read it. A source that fetches on its own schedule -
+	/// a remote machine, which must not hold the local poll behind its HTTP call - uses this as its
+	/// refresh interval. A source that is read inline does nothing with it.
+	/// </summary>
+	void SetPollingInterval(TimeSpan interval)
+	{
+	}
+
+	/// <summary>
+	/// Re-enumerates the hardware, so a device attached or removed while the plugin is running becomes
+	/// visible without a restart. A source that cannot re-enumerate does nothing.
+	/// </summary>
+	void Rescan()
+	{
+	}
+
+	/// <summary>
 	/// Updates hardware and returns the sensors it now exposes.
 	/// </summary>
 	/// <param name="hardwareFilter">

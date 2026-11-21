@@ -6,9 +6,13 @@ using Serilog;
 namespace ItaiMarom.LibreHardwareMonitorPlugin.Tests;
 
 /// <summary>
-/// The HTTP source behind one remote machine: what it asks for, what it returns, and what it does when
-/// the other machine is not answering.
+/// The HTTP source behind one remote machine: what it asks for, what it publishes, and what it reports
+/// when the other machine is not answering.
 /// </summary>
+/// <remarks>
+/// The source polls in the background now, so a test drives it with <see cref="Fetch"/> rather than
+/// waiting for a timer. <c>Read</c> is the cached answer the polling loop sees.
+/// </remarks>
 [TestFixture]
 public sealed class RemoteHardwareSourceTests
 {
@@ -27,6 +31,8 @@ public sealed class RemoteHardwareSourceTests
 		using var logger = new LoggerConfiguration().CreateLogger();
 		using var source = Create(handler, logger);
 
+		Assert.That(Fetch(source), Is.True);
+
 		var sensors = source.Read(null);
 
 		Assert.That(sensors.Single().Value, Is.EqualTo(42f));
@@ -41,7 +47,7 @@ public sealed class RemoteHardwareSourceTests
 		using var logger = new LoggerConfiguration().CreateLogger();
 		using var source = Create(handler, logger);
 
-		source.Read(null);
+		Fetch(source);
 
 		Assert.That(handler.LastUri, Is.EqualTo(new Uri("http://living-room-pc:8085/data.json")));
 	}
@@ -54,8 +60,11 @@ public sealed class RemoteHardwareSourceTests
 		using var source = Create(handler, logger);
 
 		Assert.That(source.Read(["Office PC · CPU"]), Is.Empty);
+		Assert.That(Fetch(source), Is.False);
 		Assert.That(handler.Requests, Is.Zero);
 
+		Assert.That(source.Read(["Living Room · CPU"]), Is.Empty);
+		Assert.That(Fetch(source), Is.True);
 		Assert.That(source.Read(["Living Room · CPU"]), Has.Count.EqualTo(1));
 		Assert.That(handler.Requests, Is.EqualTo(1));
 	}
@@ -67,9 +76,9 @@ public sealed class RemoteHardwareSourceTests
 		using var logger = new LoggerConfiguration().CreateLogger();
 		using var source = Create(handler, logger);
 
-		Assert.That(source.Read(null), Is.Empty);
-		Assert.That(source.Read(null), Is.Empty);
-		Assert.That(source.Read(null), Is.Empty);
+		Assert.That(Fetch(source), Is.False);
+		Assert.That(Fetch(source), Is.False);
+		Assert.That(Fetch(source), Is.False);
 
 		// The first failure schedules a retry a second out; the poll that follows within that second must
 		// not block on the same dead machine again.
@@ -83,9 +92,45 @@ public sealed class RemoteHardwareSourceTests
 		using var logger = new LoggerConfiguration().CreateLogger();
 		using var source = Create(handler, logger);
 
-		Assert.That(source.Read(null), Is.Empty);
-		Assert.That(source.Read(null), Is.Empty);
+		Assert.That(Fetch(source), Is.False);
+		Assert.That(Fetch(source), Is.False);
 		Assert.That(handler.Requests, Is.EqualTo(1));
+	}
+
+	[Test]
+	public void A_rescan_fetches_now_even_when_nothing_on_that_machine_is_watched()
+	{
+		var handler = new StubHandler(_ => Json(Document));
+		using var logger = new LoggerConfiguration().CreateLogger();
+		using var source = Create(handler, logger);
+
+		// The loop is only interested in a machine whose sensors are bound; a rescan from the window is
+		// interested in everything, because that is how an unbound sensor becomes tickable.
+		source.Read(["Office PC · CPU"]);
+		source.Rescan();
+
+		Assert.That(handler.Requests, Is.EqualTo(1));
+		Assert.That(source.Read(null), Has.Count.EqualTo(1));
+	}
+
+	[Test]
+	public async Task Opening_the_source_starts_the_background_poll()
+	{
+		var handler = new StubHandler(_ => Json(Document));
+		using var logger = new LoggerConfiguration().CreateLogger();
+		using var source = Create(handler, logger);
+		source.SetPollingInterval(TimeSpan.FromSeconds(1));
+
+		source.Open();
+
+		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+		while (source.Read(null).Count == 0 && DateTime.UtcNow < deadline)
+		{
+			await Task.Delay(10);
+		}
+
+		Assert.That(source.Read(null), Has.Count.EqualTo(1));
+		Assert.That(handler.Requests, Is.GreaterThanOrEqualTo(1));
 	}
 
 	[Test]
@@ -97,6 +142,7 @@ public sealed class RemoteHardwareSourceTests
 
 		source.Dispose();
 
+		Assert.That(Fetch(source), Is.False);
 		Assert.That(source.Read(null), Is.Empty);
 		Assert.That(handler.Requests, Is.Zero);
 	}
@@ -112,6 +158,72 @@ public sealed class RemoteHardwareSourceTests
 		Assert.That(source.SetControl("/remote/living_room/cpu/load/0", 50), Is.False);
 		Assert.That(source.ResetControl("/remote/living_room/cpu/load/0"), Is.False);
 	}
+
+	[Test]
+	public void Health_moves_from_online_to_offline_and_back()
+	{
+		var failing = true;
+		var handler = new StubHandler(_ => failing
+			? throw new HttpRequestException("unreachable")
+			: Json(Document));
+		using var logger = new LoggerConfiguration().CreateLogger();
+		using var source = Create(handler, logger);
+
+		var states = new List<RemoteSourceState>();
+		source.RemoteHealthChanged += (_, args) => states.Add(args.Status.Health.State);
+
+		Assert.That(Fetch(source), Is.False);
+		Assert.That(source.Health.State, Is.EqualTo(RemoteSourceState.Unknown));
+
+		// Each manual fetch has to clear the backoff the previous failure scheduled, exactly as the
+		// background loop does by waiting out the delay.
+		Assert.That(source.TryRetryRemote("living_room"), Is.True);
+		Assert.That(Fetch(source), Is.False);
+		Assert.That(source.Health.State, Is.EqualTo(RemoteSourceState.Unknown));
+
+		// The third failure is what the user is told to act on.
+		Assert.That(source.TryRetryRemote("living_room"), Is.True);
+		Assert.That(Fetch(source), Is.False);
+		Assert.That(source.Health.State, Is.EqualTo(RemoteSourceState.Offline));
+		Assert.That(source.Health.LastError, Is.Not.Null);
+
+		// A retry clears the backoff without waiting for it.
+		failing = false;
+		Assert.That(source.TryRetryRemote("living_room"), Is.True);
+		Assert.That(Fetch(source), Is.True);
+		Assert.That(source.Health.State, Is.EqualTo(RemoteSourceState.Online));
+		Assert.That(source.Health.LastError, Is.Null);
+
+		Assert.That(states, Is.EqualTo(new[]
+		{
+			RemoteSourceState.Offline,
+			RemoteSourceState.Online,
+		}));
+	}
+
+	[Test]
+	public void A_remote_that_has_answered_once_is_degraded_before_it_is_offline()
+	{
+		var failing = false;
+		var handler = new StubHandler(_ => failing
+			? throw new HttpRequestException("unreachable")
+			: Json(Document));
+		using var logger = new LoggerConfiguration().CreateLogger();
+		using var source = Create(handler, logger);
+
+		Assert.That(Fetch(source), Is.True);
+		failing = true;
+
+		Assert.That(Fetch(source), Is.False);
+		Assert.That(source.Health.State, Is.EqualTo(RemoteSourceState.Degraded));
+		Assert.That(source.Health.IsOnline, Is.True);
+
+		Assert.That(source.Health.HasBeenOnline, Is.True);
+		Assert.That(source.RemoteStatuses.Single().Key, Is.EqualTo("living_room"));
+	}
+
+	private static bool Fetch(RemoteHardwareSource source) =>
+		source.RefreshAsync(CancellationToken.None).GetAwaiter().GetResult();
 
 	private static RemoteHardwareSource Create(StubHandler handler, ILogger logger) =>
 		new(Source, logger, new HttpClient(handler), ownsClient: true);

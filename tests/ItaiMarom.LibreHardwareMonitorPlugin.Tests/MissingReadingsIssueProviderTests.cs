@@ -208,5 +208,8 @@ public sealed class MissingReadingsIssueProviderTests
 
 		public Task<ElevationResult> EnableAsync(CancellationToken cancellationToken = default) =>
 			Task.FromResult(new ElevationResult(ElevationOutcome.Enabled, AccessNote: _note));
+
+		public Task<ElevationResult> DisableAsync(CancellationToken cancellationToken = default) =>
+			Task.FromResult(new ElevationResult(ElevationOutcome.Disabled));
 	}
 }
