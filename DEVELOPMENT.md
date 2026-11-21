@@ -314,9 +314,13 @@ the last time a sensor answered, the last online/elevation state - and publishes
   never seen does not fire at startup.
 - Remote and elevation events seed their state on the first observation and publish on the next change,
   so starting Macro Deck while a machine is already offline is not an event.
-- Payload values are the names the automation reads afterwards (`sensor`, `value`, `threshold`, `unit`,
-  `machine`, `seconds`, `url`, `error`, `elevated`). The threshold is in the sensor's library unit, not
-  the display unit, so a Celsius sensor means Celsius whatever the widget shows.
+- Payload values are the names the automation reads afterwards (`sensorName`, `sensorId`, `machineName`,
+  `value`, `threshold`, `unit`, `seconds`, `url`, `error`, `elevated`). The threshold is in the sensor's
+  library unit, not the display unit, so a Celsius sensor means Celsius whatever the widget shows.
+- Payload names deliberately differ from configuration names where the values differ. The host compares a
+  configuration parameter with a payload parameter of the same name and only fires a trigger on a match;
+  the configuration stores a sensor's resource id and a machine's key, while the payload carries readable
+  names. Sharing those names would make a sensor- or machine-bound trigger silently never fire.
 
 The sensors a binding names are watched through `HardwareMonitor.SetEventSensors`; they are unioned with
 the declared and bound variable sensors for the poll, and kept apart so a variable subscription replacing

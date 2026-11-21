@@ -15,7 +15,11 @@ namespace ItaiMarom.LibreHardwareMonitorPlugin.Events;
 /// </remarks>
 internal static class HardwareEvents
 {
-	internal const string ProviderName = "Libre Hardware Monitor";
+	/// <summary>
+	/// Empty on purpose: the host then shows the integration's own name, which keeps the store plugin and
+	/// the test plugin apart in the event picker.
+	/// </summary>
+	internal const string ProviderName = "";
 
 	internal const string ThresholdId = "sensor-threshold";
 	internal const string StoppedId = "sensor-stopped";
@@ -34,7 +38,15 @@ internal static class HardwareEvents
 	internal const string DirectionAbove = "above";
 	internal const string DirectionBelow = "below";
 
-	/// <summary>The payload names, which are also the variables the automation can read afterwards.</summary>
+	/// <summary>
+	/// The payload names, which are also the variables the automation can read afterwards. They are
+	/// deliberately different from the configuration names where the values differ: the host compares a
+	/// configuration parameter with a payload parameter of the same name, and the configuration stores a
+	/// sensor's resource id while the payload carries the readable name.
+	/// </summary>
+	internal const string PayloadSensorName = "sensorName";
+	internal const string PayloadSensorId = "sensorId";
+	internal const string PayloadMachineName = "machineName";
 	internal const string PayloadValue = "value";
 	internal const string PayloadUnit = "unit";
 	internal const string PayloadSeconds = "seconds";
@@ -104,11 +116,12 @@ internal static class HardwareEvents
 		],
 		PayloadParameters =
 		[
-			PayloadText(SensorParameter, Strings.Events.Payload.Sensor.Label(), Strings.Events.Payload.Sensor.Description()),
+			PayloadText(PayloadSensorName, Strings.Events.Payload.Sensor.Label(), Strings.Events.Payload.Sensor.Description()),
+			PayloadText(PayloadSensorId, Strings.Events.Payload.SensorId.Label(), Strings.Events.Payload.SensorId.Description()),
 			PayloadNumber(PayloadValue, Strings.Events.Payload.Value.Label(), Strings.Events.Payload.Value.Description()),
 			PayloadNumber(ThresholdParameter, Strings.Events.Payload.Threshold.Label(), Strings.Events.Payload.Threshold.Description()),
 			PayloadText(PayloadUnit, Strings.Events.Payload.Unit.Label(), Strings.Events.Payload.Unit.Description()),
-			PayloadText(MachineParameter, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
+			PayloadText(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
 		],
 	};
 
@@ -133,9 +146,10 @@ internal static class HardwareEvents
 		],
 		PayloadParameters =
 		[
-			PayloadText(SensorParameter, Strings.Events.Payload.Sensor.Label(), Strings.Events.Payload.Sensor.Description()),
+			PayloadText(PayloadSensorName, Strings.Events.Payload.Sensor.Label(), Strings.Events.Payload.Sensor.Description()),
+			PayloadText(PayloadSensorId, Strings.Events.Payload.SensorId.Label(), Strings.Events.Payload.SensorId.Description()),
 			PayloadNumber(PayloadSeconds, Strings.Events.Payload.Seconds.Label(), Strings.Events.Payload.Seconds.Description()),
-			PayloadText(MachineParameter, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
+			PayloadText(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
 		],
 	};
 
@@ -149,7 +163,7 @@ internal static class HardwareEvents
 		ConfigurationParameters = [MachineChoice()],
 		PayloadParameters =
 		[
-			PayloadText(MachineParameter, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
+			PayloadText(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
 			PayloadText(PayloadUrl, Strings.Events.Payload.Url.Label(), Strings.Events.Payload.Url.Description()),
 			PayloadText(PayloadError, Strings.Events.Payload.Error.Label(), Strings.Events.Payload.Error.Description()),
 		],
@@ -165,7 +179,7 @@ internal static class HardwareEvents
 		ConfigurationParameters = [MachineChoice()],
 		PayloadParameters =
 		[
-			PayloadText(MachineParameter, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
+			PayloadText(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
 			PayloadText(PayloadUrl, Strings.Events.Payload.Url.Label(), Strings.Events.Payload.Url.Description()),
 		],
 	};

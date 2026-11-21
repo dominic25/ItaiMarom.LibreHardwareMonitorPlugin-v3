@@ -50,6 +50,12 @@ public sealed class EventEvaluatorTests
 		Assert.That(fixture.Publisher.Published, Has.Count.EqualTo(1));
 		Assert.That(fixture.Publisher.Published[0].EventId, Is.EqualTo(HardwareEvents.ThresholdId));
 		Assert.That(fixture.Publisher.Published[0].Parameters[HardwareEvents.PayloadValue], Is.EqualTo(90d));
+		Assert.That(
+			fixture.Publisher.Published[0].Parameters[HardwareEvents.PayloadSensorName],
+			Is.EqualTo(fixture.Sensor.DisplayName));
+		Assert.That(
+			fixture.Publisher.Published[0].Parameters[HardwareEvents.PayloadSensorId],
+			Is.EqualTo(fixture.Sensor.ResourceId));
 
 		// Still above, so the event does not repeat.
 		fixture.Evaluator.Evaluate();
@@ -155,6 +161,9 @@ public sealed class EventEvaluatorTests
 		evaluator.Evaluate();
 		Assert.That(publisher.Published, Has.Count.EqualTo(1));
 		Assert.That(publisher.Published[0].EventId, Is.EqualTo(HardwareEvents.RemoteOfflineId));
+		Assert.That(
+			publisher.Published[0].Parameters[HardwareEvents.PayloadMachineName],
+			Is.EqualTo(status.Name));
 
 		health.Statuses[0] = status;
 		evaluator.Evaluate();

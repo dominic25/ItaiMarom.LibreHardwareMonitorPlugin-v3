@@ -271,6 +271,12 @@
   <data name="Events.Payload.Sensor.Description" xml:space="preserve">
     <value>The sensor the event is about.</value>
   </data>
+  <data name="Events.Payload.SensorId.Label" xml:space="preserve">
+    <value>Sensor ID</value>
+  </data>
+  <data name="Events.Payload.SensorId.Description" xml:space="preserve">
+    <value>The sensor's stable library identifier, for a flow that needs to tell two sensors with the same name apart.</value>
+  </data>
   <data name="Events.Payload.Value.Label" xml:space="preserve">
     <value>Value</value>
   </data>

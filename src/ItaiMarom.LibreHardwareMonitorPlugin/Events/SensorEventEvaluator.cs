@@ -183,11 +183,12 @@ internal sealed class SensorEventEvaluator
 				state.Active = true;
 				Publish(publisher, binding.EventId, new Dictionary<string, object?>
 				{
-					[HardwareEvents.SensorParameter] = sensor.DisplayName,
+					[HardwareEvents.PayloadSensorName] = sensor.DisplayName,
+					[HardwareEvents.PayloadSensorId] = sensor.ResourceId,
 					[HardwareEvents.PayloadValue] = value,
 					[HardwareEvents.ThresholdParameter] = threshold,
 					[HardwareEvents.PayloadUnit] = SensorFormatting.Unit(sensor.SensorType) ?? string.Empty,
-					[HardwareEvents.MachineParameter] = MachineOf(sensor),
+					[HardwareEvents.PayloadMachineName] = MachineOf(sensor),
 				});
 			}
 
@@ -240,9 +241,10 @@ internal sealed class SensorEventEvaluator
 		state.StoppedFired = true;
 		Publish(publisher, binding.EventId, new Dictionary<string, object?>
 		{
-			[HardwareEvents.SensorParameter] = sensor.DisplayName,
+			[HardwareEvents.PayloadSensorName] = sensor.DisplayName,
+			[HardwareEvents.PayloadSensorId] = sensor.ResourceId,
 			[HardwareEvents.PayloadSeconds] = (now - lastSeen).TotalSeconds,
-			[HardwareEvents.MachineParameter] = MachineOf(sensor),
+			[HardwareEvents.PayloadMachineName] = MachineOf(sensor),
 		});
 	}
 
@@ -271,7 +273,7 @@ internal sealed class SensorEventEvaluator
 		{
 			Publish(publisher, binding.EventId, new Dictionary<string, object?>
 			{
-				[HardwareEvents.MachineParameter] = status.Name,
+				[HardwareEvents.PayloadMachineName] = status.Name,
 				[HardwareEvents.PayloadUrl] = status.Url,
 				[HardwareEvents.PayloadError] = status.Health.LastError ?? string.Empty,
 			});
@@ -280,7 +282,7 @@ internal sealed class SensorEventEvaluator
 		{
 			Publish(publisher, binding.EventId, new Dictionary<string, object?>
 			{
-				[HardwareEvents.MachineParameter] = status.Name,
+				[HardwareEvents.PayloadMachineName] = status.Name,
 				[HardwareEvents.PayloadUrl] = status.Url,
 			});
 		}

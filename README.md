@@ -185,9 +185,10 @@ rate, so a flow starts when the condition happens rather than being polled for b
 - **Elevated readings changed** - no fields. It fires when the helper starts or stops, which is when the
   driver-backed sensors and fan controls appear or disappear.
 
-Each event carries values the flow can use: the sensor and machine names, the reading and threshold, the
-unit, and for a stopped sensor how long it had been quiet. A threshold that is already true when you add
-the event can fire on the next poll; give it a **For at least** time if that matters.
+Each event carries values the flow can use: `sensorName` and the stable `sensorId`, `machineName`, the
+reading and threshold, the unit, and for a stopped sensor how long it had been quiet. A threshold that is
+already true when you add the event can fire on the next poll; give it a **For at least** time if that
+matters.
 
 ## Administrator rights and PawnIO are optional
 
