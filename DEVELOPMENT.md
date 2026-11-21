@@ -83,6 +83,9 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
     ClassicWindowPage.cs               the old dialog, rendered server-side with a live reading per sensor
     SensorReadingSource.cs             the window's value column: one full read of the machine per refresh
     SensorCategory.cs                  the window's tree: machine, hardware, reading kind, sensors
+  Events/
+    HardwareEvents.cs                  the event definitions offered to the automation editor
+    SensorEventEvaluator.cs            threshold, stopped-sensor, remote and elevation events
   Issues/
     MissingReadingsIssueProvider.cs    the warning about readings the driver would answer with
     RemoteHealthIssueProvider.cs       one issue per unreachable remote machine, with a retry
@@ -288,6 +291,39 @@ plugin therefore drives exactly the sensors that report one:
 - **A failed write has one answer.** A write that throws because the device vanished under the polling
   gate is reported as `Unavailable`, the same as a control that is no longer there: the value was not
   applied and the sensor cannot be driven right now.
+
+## How events work
+
+The plugin is an `IEventProvider` and an `IDynamicEventOptionsProvider`; the host stores what the user
+configures and hands it back through `IEventPublisher.GetBindings`. There are five definitions, built
+without touching hardware:
+
+- `sensor-threshold` - sensor, direction (`above`/`below`), threshold, dwell and hysteresis.
+- `sensor-stopped` - sensor and grace.
+- `remote-offline` / `remote-online` - one remote machine.
+- `elevation-changed` - no configuration.
+
+`SensorEventEvaluator` runs after every poll, on the polling thread and outside the hardware gate. It
+keeps a small state record per binding - the moment a threshold was first crossed, whether it has fired,
+the last time a sensor answered, the last online/elevation state - and publishes only on a transition:
+
+- A threshold has to hold for its dwell before it fires. Once it has fired it stays active until the
+  reading clears the threshold by the hysteresis amount, in the opposite direction. Publishing while it
+  stays past the line would turn a notification into a stream.
+- A stopped sensor fires once after its grace, then resets when a reading comes back. A sensor that was
+  never seen does not fire at startup.
+- Remote and elevation events seed their state on the first observation and publish on the next change,
+  so starting Macro Deck while a machine is already offline is not an event.
+- Payload values are the names the automation reads afterwards (`sensor`, `value`, `threshold`, `unit`,
+  `machine`, `seconds`, `url`, `error`, `elevated`). The threshold is in the sensor's library unit, not
+  the display unit, so a Celsius sensor means Celsius whatever the widget shows.
+
+The sensors a binding names are watched through `HardwareMonitor.SetEventSensors`; they are unioned with
+the declared and bound variable sensors for the poll, and kept apart so a variable subscription replacing
+its own set cannot silently stop an event. The evaluator re-reads the bindings every five seconds, and
+enumerates hardware only when the set of configured sensors changes or one is missing (retried every
+thirty seconds). A templated parameter value is not resolved: the event reads the literal the host
+stored.
 
 ## How the Macro Deck 2 migration works
 
@@ -547,6 +583,8 @@ Step-by-step port from the Macro Deck 2 plugin:
 - [x] Elevation control - **Stop helper** in the window, handing the fans back first, plus an
       `elevated_readings` variable.
 - [x] Remote credentials are no longer echoed back into the settings page, with an http warning.
+- [x] Events - sensor threshold with dwell and hysteresis, stopped sensor, remote offline/online, and the
+      elevated helper starting or stopping, with payload values for the automation.
 
 ## Maybe
 

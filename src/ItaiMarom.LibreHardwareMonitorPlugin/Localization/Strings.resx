@@ -178,4 +178,154 @@
   <data name="Variables.Elevated.Description" xml:space="preserve">
     <value>Whether the elevated hardware helper is currently reading the driver-backed sensors and driving fans.</value>
   </data>
+  <data name="Events.Category" xml:space="preserve">
+    <value>Hardware</value>
+  </data>
+  <data name="Events.Sensor.Label" xml:space="preserve">
+    <value>Sensor</value>
+  </data>
+  <data name="Events.Sensor.Description" xml:space="preserve">
+    <value>The sensor whose reading the event watches.</value>
+  </data>
+  <data name="Events.Sensor.Placeholder" xml:space="preserve">
+    <value>Pick a sensor</value>
+  </data>
+  <data name="Events.Machine.Label" xml:space="preserve">
+    <value>Remote machine</value>
+  </data>
+  <data name="Events.Machine.Description" xml:space="preserve">
+    <value>The remote machine whose reachability the event watches.</value>
+  </data>
+  <data name="Events.Machine.Placeholder" xml:space="preserve">
+    <value>Pick a machine</value>
+  </data>
+  <data name="Events.Threshold.Name" xml:space="preserve">
+    <value>Sensor threshold crossed</value>
+  </data>
+  <data name="Events.Threshold.Description" xml:space="preserve">
+    <value>Starts an automation when a sensor stays above or below a value for a chosen time. The threshold is in the sensor's own unit, for example °C for a temperature.</value>
+  </data>
+  <data name="Events.Threshold.Direction.Label" xml:space="preserve">
+    <value>Direction</value>
+  </data>
+  <data name="Events.Threshold.Direction.Description" xml:space="preserve">
+    <value>Whether the event is about the reading going up or down.</value>
+  </data>
+  <data name="Events.Threshold.Direction.Above" xml:space="preserve">
+    <value>Above or equal</value>
+  </data>
+  <data name="Events.Threshold.Direction.Below" xml:space="preserve">
+    <value>Below or equal</value>
+  </data>
+  <data name="Events.Threshold.Limit.Label" xml:space="preserve">
+    <value>Threshold</value>
+  </data>
+  <data name="Events.Threshold.Limit.Description" xml:space="preserve">
+    <value>The value the reading is compared with, in the sensor's own unit.</value>
+  </data>
+  <data name="Events.Threshold.Dwell.Label" xml:space="preserve">
+    <value>For at least (seconds)</value>
+  </data>
+  <data name="Events.Threshold.Dwell.Description" xml:space="preserve">
+    <value>How long the reading has to stay past the threshold before the event fires. Zero fires on the first reading.</value>
+  </data>
+  <data name="Events.Threshold.Hysteresis.Label" xml:space="preserve">
+    <value>Clear by</value>
+  </data>
+  <data name="Events.Threshold.Hysteresis.Description" xml:space="preserve">
+    <value>How far the reading has to come back past the threshold before the event can fire again. Stops a value hovering on the line from firing repeatedly.</value>
+  </data>
+  <data name="Events.Stopped.Name" xml:space="preserve">
+    <value>Sensor stopped reporting</value>
+  </data>
+  <data name="Events.Stopped.Description" xml:space="preserve">
+    <value>Starts an automation when a sensor has had no reading for a chosen time - a stopped fan, a drive that stopped answering, or a device that went away.</value>
+  </data>
+  <data name="Events.Stopped.Grace.Label" xml:space="preserve">
+    <value>After (seconds)</value>
+  </data>
+  <data name="Events.Stopped.Grace.Description" xml:space="preserve">
+    <value>How long the sensor may have no reading before the event fires.</value>
+  </data>
+  <data name="Events.RemoteOffline.Name" xml:space="preserve">
+    <value>Remote machine offline</value>
+  </data>
+  <data name="Events.RemoteOffline.Description" xml:space="preserve">
+    <value>Starts an automation when a configured remote machine stops answering.</value>
+  </data>
+  <data name="Events.RemoteOnline.Name" xml:space="preserve">
+    <value>Remote machine online</value>
+  </data>
+  <data name="Events.RemoteOnline.Description" xml:space="preserve">
+    <value>Starts an automation when a remote machine that was offline answers again.</value>
+  </data>
+  <data name="Events.Elevation.Name" xml:space="preserve">
+    <value>Elevated readings changed</value>
+  </data>
+  <data name="Events.Elevation.Description" xml:space="preserve">
+    <value>Starts an automation when the elevated hardware helper starts or stops, which is when the driver-backed readings and fan controls appear or go away.</value>
+  </data>
+  <data name="Events.Payload.Sensor.Label" xml:space="preserve">
+    <value>Sensor</value>
+  </data>
+  <data name="Events.Payload.Sensor.Description" xml:space="preserve">
+    <value>The sensor the event is about.</value>
+  </data>
+  <data name="Events.Payload.Value.Label" xml:space="preserve">
+    <value>Value</value>
+  </data>
+  <data name="Events.Payload.Value.Description" xml:space="preserve">
+    <value>The reading that crossed the threshold, in the sensor's own unit.</value>
+  </data>
+  <data name="Events.Payload.Threshold.Label" xml:space="preserve">
+    <value>Threshold</value>
+  </data>
+  <data name="Events.Payload.Threshold.Description" xml:space="preserve">
+    <value>The configured threshold.</value>
+  </data>
+  <data name="Events.Payload.Unit.Label" xml:space="preserve">
+    <value>Unit</value>
+  </data>
+  <data name="Events.Payload.Unit.Description" xml:space="preserve">
+    <value>The unit the value and threshold are in.</value>
+  </data>
+  <data name="Events.Payload.Machine.Label" xml:space="preserve">
+    <value>Machine</value>
+  </data>
+  <data name="Events.Payload.Machine.Description" xml:space="preserve">
+    <value>The machine the sensor belongs to.</value>
+  </data>
+  <data name="Events.Payload.Seconds.Label" xml:space="preserve">
+    <value>Seconds</value>
+  </data>
+  <data name="Events.Payload.Seconds.Description" xml:space="preserve">
+    <value>How long the sensor had been without a reading when the event fired.</value>
+  </data>
+  <data name="Events.Payload.Url.Label" xml:space="preserve">
+    <value>Address</value>
+  </data>
+  <data name="Events.Payload.Url.Description" xml:space="preserve">
+    <value>The remote machine's data address.</value>
+  </data>
+  <data name="Events.Payload.Error.Label" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="Events.Payload.Error.Description" xml:space="preserve">
+    <value>The last error the remote machine reported.</value>
+  </data>
+  <data name="Events.Payload.Elevated.Label" xml:space="preserve">
+    <value>Elevated</value>
+  </data>
+  <data name="Events.Payload.Elevated.Description" xml:space="preserve">
+    <value>Whether elevated readings are now on.</value>
+  </data>
+  <data name="Events.SensorsUnavailable" xml:space="preserve">
+    <value>The sensors could not be read, so there is nothing to pick from.</value>
+  </data>
+  <data name="Events.NoRemoteMachines" xml:space="preserve">
+    <value>No remote machines are configured. Add one in the sensor window first.</value>
+  </data>
+  <data name="Events.ThisMachine" xml:space="preserve">
+    <value>This PC</value>
+  </data>
 </root>

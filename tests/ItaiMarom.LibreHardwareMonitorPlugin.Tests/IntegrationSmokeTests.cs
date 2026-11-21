@@ -1,7 +1,11 @@
+using System.Text.Json;
+using ItaiMarom.LibreHardwareMonitorPlugin.Events;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
+using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
 using LibreHardwareMonitor.Hardware;
 using MacroDeck.Plugin.Testing.Fakes;
+using MacroDeck.Sdk.Events;
 using MacroDeck.Sdk.Variables;
 using NUnit.Framework;
 using Serilog;
@@ -166,6 +170,84 @@ public sealed class IntegrationSmokeTests
 
 		Assert.That(created, Is.EqualTo(new[] { remote }));
 	}
+
+	[Test]
+	public async Task The_event_editor_lists_the_sensors()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var sensor = TestSensor.Create("CPU", "CPU Package", SensorType.Temperature);
+		var source = new FakeHardwareSensorSource().Add(sensor, 42f);
+		await using var integration = new LibreHardwareMonitorIntegration(
+			logger,
+			source,
+			new SensorSelection(),
+			FakeAccessDiagnosis.Reachable(),
+			new RecordingCatalogNotifier());
+
+		var result = await integration.GetEventOptionsAsync(
+			new MacroDeck.Sdk.Events.EventOptionsContext
+			{
+				EventId = HardwareEvents.ThresholdId,
+				ParameterName = HardwareEvents.SensorParameter,
+				Filter = "package",
+			},
+			CancellationToken.None);
+
+		Assert.That(result.Error.IsEmpty, Is.True);
+		Assert.That(result.Options, Has.Count.EqualTo(1));
+		Assert.That(result.Options[0].Value, Is.EqualTo(sensor.ResourceId));
+	}
+
+	[Test]
+	public async Task A_configured_threshold_event_is_published_by_the_poll_loop()
+	{
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var sensor = TestSensor.Create("CPU", "CPU Package", SensorType.Temperature);
+		var source = new FakeHardwareSensorSource().Add(sensor, 95f);
+		await using var integration = new LibreHardwareMonitorIntegration(
+			logger,
+			source,
+			new SensorSelection(),
+			FakeAccessDiagnosis.Reachable(),
+			new RecordingCatalogNotifier());
+
+		var context = new FakeIntegrationContext();
+		var entry = MigrationTestData.SeedMigratedSensors(context.Config);
+		context.Config.SeedString(entry, MigratedSensorSelection.PollingRateKey, "10");
+
+		context.Events.SetBindings(
+		[
+			new EventBinding
+			{
+				EventId = HardwareEvents.ThresholdId,
+				Parameters = new Dictionary<string, EventBindingValue>(StringComparer.Ordinal)
+				{
+					[HardwareEvents.SensorParameter] = BindingValue(sensor.ResourceId),
+					[HardwareEvents.DirectionParameter] = BindingValue("above"),
+					[HardwareEvents.ThresholdParameter] = BindingValue(80d),
+					[HardwareEvents.DwellParameter] = BindingValue(0d),
+					[HardwareEvents.HysteresisParameter] = BindingValue(0d),
+				},
+			},
+		]);
+
+		Assert.That(context.Events.GetBindings(), Has.Count.EqualTo(1));
+
+		await integration.InitializeAsync(context);
+		await WaitUntilAsync(() => context.Events.Published.Any(
+			published => published.EventId == HardwareEvents.ThresholdId));
+
+		var published = context.Events.Published.First(item => item.EventId == HardwareEvents.ThresholdId);
+		Assert.That(published.Parameters, Is.Not.Null);
+		Assert.That(
+			published.Parameters!.Value.GetProperty(HardwareEvents.PayloadValue).GetDouble(),
+			Is.EqualTo(95d));
+
+		await integration.ShutdownAsync();
+	}
+
+	private static EventBindingValue BindingValue(object value) =>
+		new(JsonSerializer.SerializeToElement(value), string.Empty);
 
 	/// <summary>
 	/// Waits for the loop to reach the hardware. Stopping before it has opened is a race the assertion

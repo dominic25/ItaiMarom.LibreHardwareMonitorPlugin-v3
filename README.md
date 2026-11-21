@@ -48,6 +48,9 @@ without them.
 - **Rescan instead of restart** - *Rescan hardware* in the sensor window, or the action of the same name,
   re-reads the machine so a device attached or removed since Macro Deck started appears without a restart.
   Fan speeds set by software are put back after the rescan.
+- **Events for automations** - a sensor threshold held for a chosen time (with hysteresis), a sensor that
+  stopped reporting, a remote machine going offline or back online, and the elevated helper starting or
+  stopping. Configure them in Macro Deck's automation editor; no button is needed.
 
 ## Getting started
 
@@ -163,6 +166,28 @@ sensor as on a local one.
   its range from the chip, the write happens when you let go rather than at every intermediate point, and
   the slider settles on what the chip accepted. The plugin also holds every write to the chip's own range,
   so a value outside it arrives clamped.
+
+### 4. React without a button
+
+Macro Deck's automation editor lists these events under the plugin. They are evaluated at the polling
+rate, so a flow starts when the condition happens rather than being polled for by the flow itself.
+
+- **Sensor threshold crossed** - pick a sensor, **above or equal** or **below or equal**, the threshold,
+  how long the reading must stay past it (**For at least**), and how far it must come back before it can
+  fire again (**Clear by**, the hysteresis). The threshold is in the sensor's own unit: °C for a
+  temperature, % for a load, and so on.
+- **Sensor stopped reporting** - pick a sensor and a grace period. It fires when the sensor has had no
+  reading for that long, which covers a stopped fan, a drive that stopped answering, and a device that
+  went away.
+- **Remote machine offline** and **Remote machine online** - pick a configured machine. They fire on the
+  transition, so a machine that was already offline when Macro Deck started does not fire until it has
+  come back and gone away again.
+- **Elevated readings changed** - no fields. It fires when the helper starts or stops, which is when the
+  driver-backed sensors and fan controls appear or disappear.
+
+Each event carries values the flow can use: the sensor and machine names, the reading and threshold, the
+unit, and for a stopped sensor how long it had been quiet. A threshold that is already true when you add
+the event can fire on the next poll; give it a **For at least** time if that matters.
 
 ## Administrator rights and PawnIO are optional
 

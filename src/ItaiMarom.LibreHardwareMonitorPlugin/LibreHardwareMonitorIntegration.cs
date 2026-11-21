@@ -1,14 +1,17 @@
 using ItaiMarom.LibreHardwareMonitorPlugin.Actions;
 using ItaiMarom.LibreHardwareMonitorPlugin.Configuration;
+using ItaiMarom.LibreHardwareMonitorPlugin.Events;
 using ItaiMarom.LibreHardwareMonitorPlugin.Hardware;
 using ItaiMarom.LibreHardwareMonitorPlugin.Issues;
 using ItaiMarom.LibreHardwareMonitorPlugin.Migration;
 using ItaiMarom.LibreHardwareMonitorPlugin.Variables;
+using MacroDeck.Localization;
 using MacroDeck.Plugin.Hosting.Integrations.HostApis;
 using MacroDeck.Plugin.Protocol.Handshake;
 using MacroDeck.Sdk;
 using MacroDeck.Sdk.Actions;
 using MacroDeck.Sdk.ConfigFlow;
+using MacroDeck.Sdk.Events;
 using MacroDeck.Sdk.Issues;
 using MacroDeck.Sdk.Migration;
 using MacroDeck.Sdk.Notifications;
@@ -55,6 +58,8 @@ public sealed class LibreHardwareMonitorIntegration :
 	IVariableProvider,
 	IConfigFlowProvider,
 	IIntegrationIssueProvider,
+	IEventProvider,
+	IDynamicEventOptionsProvider,
 	IAsyncDisposable
 {
 	private readonly HardwareMonitor _hardware;
@@ -62,6 +67,7 @@ public sealed class LibreHardwareMonitorIntegration :
 	private readonly SensorVariableProvider _variables;
 	private readonly MissingReadingsIssueProvider _issues;
 	private readonly RemoteHealthIssueProvider _remoteIssues;
+	private readonly SensorEventEvaluator _events;
 	private readonly IHardwareElevation? _elevation;
 	private readonly IRemoteSourceController? _remoteSources;
 	private readonly IRemoteHealthSource? _remoteHealth;
@@ -140,6 +146,8 @@ public sealed class LibreHardwareMonitorIntegration :
 			_elevation);
 		_issues = new MissingReadingsIssueProvider(diagnosis, _elevation);
 		_remoteIssues = new RemoteHealthIssueProvider(_remoteHealth);
+		_events = new SensorEventEvaluator(_hardware, _remoteHealth, _elevation, _logger);
+		_hardware.Polled += OnPolled;
 		Actions =
 		[
 			new SetFanSpeedAction(_hardware, _logger),
@@ -187,6 +195,12 @@ public sealed class LibreHardwareMonitorIntegration :
 
 	/// <inheritdoc />
 	public IReadOnlyList<IActionDefinition> Actions { get; }
+
+	/// <inheritdoc />
+	public string ProviderName => HardwareEvents.ProviderName;
+
+	/// <inheritdoc />
+	public IReadOnlyList<EventDefinition> EventDefinitions => HardwareEvents.Definitions;
 
 	/// <inheritdoc />
 	public IReadOnlyList<VariableDefinition> Variables => _variables.Variables;
@@ -242,6 +256,77 @@ public sealed class LibreHardwareMonitorIntegration :
 		VariableCatalogQuery query,
 		CancellationToken cancellationToken = default) =>
 		_variables.DiscoverAsync(query, cancellationToken);
+
+	/// <summary>
+	/// The options for the event editor's pickers. Enumerating sensors is a deliberate, user-initiated
+	/// act, exactly as it is for the fan action's picker; a failure is reported rather than shown as an
+	/// empty list with no explanation.
+	/// </summary>
+	public async Task<DynamicOptionsResult> GetEventOptionsAsync(
+		EventOptionsContext context,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+
+		if (string.Equals(context.ParameterName, HardwareEvents.SensorParameter, StringComparison.Ordinal))
+		{
+			IReadOnlyList<SensorIdentifier> sensors;
+			try
+			{
+				sensors = await _hardware.EnumerateSensorsAsync(cancellationToken).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
+			catch (Exception exception)
+			{
+				_logger.Warning(exception, "The sensors for the event editor could not be enumerated.");
+				return new DynamicOptionsResult
+				{
+					Options = [],
+					Error = Strings.Events.SensorsUnavailable(),
+				};
+			}
+
+			return new DynamicOptionsResult
+			{
+				Options =
+				[
+					.. sensors
+						.Where(sensor => sensor.Matches(context.Filter))
+						.Select(sensor => new ActionParameterOption
+						{
+							Value = sensor.ResourceId,
+							Label = LocalizedText.FromLiteral($"{sensor.DisplayName} - {sensor.Hardware.Path}"),
+						}),
+				],
+			};
+		}
+
+		if (string.Equals(context.ParameterName, HardwareEvents.MachineParameter, StringComparison.Ordinal))
+		{
+			var options = (_remoteHealth?.RemoteStatuses ?? [])
+				.Where(status => string.IsNullOrWhiteSpace(context.Filter)
+					|| status.Name.Contains(context.Filter, StringComparison.OrdinalIgnoreCase))
+				.Select(status => new ActionParameterOption
+				{
+					Value = status.Key,
+					Label = LocalizedText.FromLiteral($"{status.Name} ({status.Url})"),
+				})
+				.ToArray();
+
+			return options.Length == 0
+				? new DynamicOptionsResult
+				{
+					Options = [],
+					Error = Strings.Events.NoRemoteMachines(),
+				}
+				: new DynamicOptionsResult { Options = options };
+		}
+
+		return new DynamicOptionsResult { Options = [] };
+	}
 
 	/// <summary>
 	/// The one issue this plugin can raise, asked when the host asks rather than remembered from start-up.
@@ -322,6 +407,7 @@ public sealed class LibreHardwareMonitorIntegration :
 
 		Volatile.Write(ref _variableApi, context.Variables);
 		Volatile.Write(ref _notifications, context.Notifications);
+		_events.Attach(context.Events);
 
 		// What the host holds is the whole of what this plugin is configured with, so it is read on every
 		// initialize rather than cached: an entry the user removed has to stop being a variable.
@@ -396,6 +482,7 @@ public sealed class LibreHardwareMonitorIntegration :
 	{
 		Volatile.Write(ref _variableApi, null);
 		Volatile.Write(ref _notifications, null);
+		_events.Attach(null);
 		await _hardware.StopAsync().ConfigureAwait(false);
 	}
 
@@ -404,6 +491,9 @@ public sealed class LibreHardwareMonitorIntegration :
 	{
 		// The window stops listening first: it can hand a selection to a flow, and a flow that is still
 		// running when the loop is torn down has nothing left to read.
+		_hardware.Polled -= OnPolled;
+		_events.Attach(null);
+
 		await _window.DisposeAsync().ConfigureAwait(false);
 
 		if (_remoteHealth is not null && Interlocked.Exchange(ref _healthSubscribed, 0) == 1)
@@ -484,6 +574,9 @@ public sealed class LibreHardwareMonitorIntegration :
 			_logger.Warning(exception, "The elevated hardware helper could not be started at startup.");
 		}
 	}
+
+	/// <summary>Runs the event evaluator after a poll; it keeps its own state and never throws here.</summary>
+	private void OnPolled(object? sender, EventArgs args) => _events.Evaluate();
 
 	/// <summary>
 	/// Rebuilds the tree the sensor window is showing after a rescan, so a device that was just attached

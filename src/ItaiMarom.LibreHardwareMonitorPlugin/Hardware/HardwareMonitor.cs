@@ -41,6 +41,12 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	private readonly HashSet<SensorIdentifier> _watched = [];
 
 	/// <summary>
+	/// Sensors an event needs, which are not variables. They are watched alongside the declared and bound
+	/// sensors and survive a variable subscription replacing its own set.
+	/// </summary>
+	private readonly HashSet<SensorIdentifier> _eventWatched = [];
+
+	/// <summary>
 	/// The software value last written to each fan, kept so a rescan can put it back. A rebuilt control
 	/// starts in its default mode, and a user who set a fan should not have that silently undone by a
 	/// rescan.
@@ -63,6 +69,13 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		_logger = (logger ?? throw new ArgumentNullException(nameof(logger))).ForContext<HardwareMonitor>();
 		_diagnosis = diagnosis ?? new KernelAccessDiagnosis();
 	}
+
+	/// <summary>
+	/// Raised after every poll, on the polling thread. The integration uses it to evaluate the events the
+	/// user configured; it runs outside the hardware gate, so an evaluator may read the cache or enumerate
+	/// without deadlocking the loop.
+	/// </summary>
+	public event EventHandler? Polled;
 
 	/// <summary>Whether the polling loop is running.</summary>
 	public bool IsRunning
@@ -88,11 +101,33 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		{
 			_watched.Clear();
 			_watched.UnionWith(sensors);
+			PruneUnwatched();
+		}
+	}
 
-			foreach (var key in _readings.Keys.Where(key => !_watched.Contains(key)).ToArray())
-			{
-				_readings.Remove(key);
-			}
+	/// <summary>
+	/// Replaces the sensors an event needs. A sensor that is also a variable is still watched by that; the
+	/// two sets are unioned when the loop polls and pruned together when either changes.
+	/// </summary>
+	public void SetEventSensors(IEnumerable<SensorIdentifier> sensors)
+	{
+		ArgumentNullException.ThrowIfNull(sensors);
+
+		lock (_sync)
+		{
+			_eventWatched.Clear();
+			_eventWatched.UnionWith(sensors);
+			PruneUnwatched();
+		}
+	}
+
+	private void PruneUnwatched()
+	{
+		foreach (var key in _readings.Keys
+			.Where(key => !_watched.Contains(key) && !_eventWatched.Contains(key))
+			.ToArray())
+		{
+			_readings.Remove(key);
 		}
 	}
 
@@ -475,6 +510,17 @@ public sealed class HardwareMonitor : IAsyncDisposable
 					_logger.Warning(exception, "A hardware poll failed; keeping the previous readings.");
 				}
 
+				try
+				{
+					Polled?.Invoke(this, EventArgs.Empty);
+				}
+				catch (Exception exception)
+				{
+					// An event evaluator is a subscriber, not the loop: its failure must not stop the
+					// readings it was watching.
+					_logger.Debug(exception, "An event subscriber failed after a poll.");
+				}
+
 				await Task.Delay(options.PollingInterval, cancellationToken).ConfigureAwait(false);
 			}
 		}
@@ -493,13 +539,14 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		SensorIdentifier[] watched;
 		lock (_sync)
 		{
-			if (_watched.Count == 0)
+			if (_watched.Count == 0 && _eventWatched.Count == 0)
 			{
-				// Nothing is bound yet. Reading hardware nothing consumes would be pure cost.
+				// Nothing is bound and no event needs a reading. Reading hardware nothing consumes would
+				// be pure cost.
 				return;
 			}
 
-			watched = [.. _watched];
+			watched = [.. _watched.Union(_eventWatched)];
 		}
 
 		var filter = watched
@@ -517,7 +564,8 @@ public sealed class HardwareMonitor : IAsyncDisposable
 			{
 				// A sample with no value holds no value: leave what the last poll saw rather than deleting
 				// it, so a single null does not make a variable blink out and back within one interval.
-				if (sample.Value is { } value && _watched.Contains(sample.Sensor))
+				if (sample.Value is { } value
+					&& (_watched.Contains(sample.Sensor) || _eventWatched.Contains(sample.Sensor)))
 				{
 					_readings[sample.Sensor] = new Reading(value, sample.Control, sampledAt);
 				}
