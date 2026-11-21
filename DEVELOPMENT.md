@@ -259,8 +259,10 @@ plugin therefore drives exactly the sensors that report one:
   **Restore fan control** returns the same sensor to the hardware's own curve; **Restore all fans** does
   that for every controllable sensor at once. The undo matters: a software value survives the plugin
   process, so without it a fan would keep a speed set once until the machine restarts. The same reset
-  runs when the elevated helper is stopped, and - unless the window's box is cleared - from
-  `DisposeAsync`, so only a clean shutdown can perform it.
+  runs when the elevated helper is stopped, and - unless the window's box is cleared - on shutdown.
+  Shutdown has two paths because the host does not always dispose the integration when it stops the
+  plugin: `DisposeAsync` and an `AppDomain.ProcessExit` hook, guarded so only one of them performs the
+  reset. A process that is killed outright cannot run either.
 - **The same fans are writable variables.** A sensor with a control is declared with `Write`, so Macro
   Deck's own **Slider** widget can bind to a declared variable or to a catalog binding and drive it
   two-way. The reading carries the control's reported range and a one-percent step, the drag commits on

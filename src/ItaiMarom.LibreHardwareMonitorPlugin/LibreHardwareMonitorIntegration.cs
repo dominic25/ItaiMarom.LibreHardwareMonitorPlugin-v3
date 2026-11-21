@@ -77,6 +77,16 @@ public sealed class LibreHardwareMonitorIntegration :
 	private readonly ILogger _logger;
 
 	/// <summary>
+	/// The process-exit hook, so a host that stops the plugin without disposing the integration still
+	/// hands the fans back. It is the same work <see cref="DisposeAsync"/> does, guarded so only one of
+	/// them runs it.
+	/// </summary>
+	private readonly EventHandler _processExit;
+
+	/// <summary>Set once the fan restore has been attempted, by either shutdown path.</summary>
+	private int _fansRestored;
+
+	/// <summary>
 	/// Whether every software fan control is handed back when this process stops. On unless the user
 	/// cleared the box: a fan left at a written speed with nothing able to undo it is the failure the
 	/// preference exists to avoid.
@@ -148,6 +158,8 @@ public sealed class LibreHardwareMonitorIntegration :
 		_remoteIssues = new RemoteHealthIssueProvider(_remoteHealth);
 		_events = new SensorEventEvaluator(_hardware, _remoteHealth, _elevation, _logger);
 		_hardware.Polled += OnPolled;
+		_processExit = (_, _) => RestoreFansOnExitBlocking();
+		AppDomain.CurrentDomain.ProcessExit += _processExit;
 		Actions =
 		[
 			new SetFanSpeedAction(_hardware, _logger),
@@ -489,6 +501,8 @@ public sealed class LibreHardwareMonitorIntegration :
 	/// <inheritdoc />
 	public async ValueTask DisposeAsync()
 	{
+		AppDomain.CurrentDomain.ProcessExit -= _processExit;
+
 		// The window stops listening first: it can hand a selection to a flow, and a flow that is still
 		// running when the loop is torn down has nothing left to read.
 		_hardware.Polled -= OnPolled;
@@ -505,23 +519,44 @@ public sealed class LibreHardwareMonitorIntegration :
 
 		// Only a real shutdown reaches this, not the stop-and-start of a reconnect. The fans are handed
 		// back while the source - local or the elevated helper - can still reach them.
-		if (_restoreFansOnExit && Volatile.Read(ref _initialized) != 0)
-		{
-			try
-			{
-				var reset = await _hardware.ResetAllControlsAsync(CancellationToken.None).ConfigureAwait(false);
-				_logger.Information(
-					"{ResetCount} fan controls were handed back as the plugin stopped.",
-					reset.Reset);
-			}
-			catch (Exception exception)
-			{
-				_logger.Warning(exception, "The fan controls could not be handed back as the plugin stopped.");
-			}
-		}
+		await RestoreFansOnExitAsync().ConfigureAwait(false);
 
 		await _hardware.DisposeAsync().ConfigureAwait(false);
 	}
+
+	/// <summary>
+	/// Hands every software fan control back, once per process. Called from both the normal dispose and
+	/// the process-exit hook: the host's stop path does not necessarily dispose the integration, and a
+	/// fan left at a written speed with nothing able to undo it is the failure this guards against.
+	/// </summary>
+	private async Task RestoreFansOnExitAsync()
+	{
+		if (!_restoreFansOnExit
+			|| Volatile.Read(ref _initialized) == 0
+			|| Interlocked.Exchange(ref _fansRestored, 1) == 1)
+		{
+			return;
+		}
+
+		try
+		{
+			var reset = await _hardware.ResetAllControlsAsync(CancellationToken.None).ConfigureAwait(false);
+			_logger.Information(
+				"{ResetCount} fan controls were handed back as the plugin stopped.",
+				reset.Reset);
+		}
+		catch (Exception exception)
+		{
+			_logger.Warning(exception, "The fan controls could not be handed back as the plugin stopped.");
+		}
+	}
+
+	/// <summary>
+	/// The process-exit path cannot await. The reset is one short hardware call, and this is the last
+	/// chance to make it before the helper the fans were written through goes away.
+	/// </summary>
+	private void RestoreFansOnExitBlocking() =>
+		RestoreFansOnExitAsync().GetAwaiter().GetResult();
 
 	/// <summary>
 	/// The startup attempt, or null when this process did not make one. It exists so a test can wait for
