@@ -63,7 +63,8 @@ internal sealed class RemoteHealthIssueProvider
 
 		return _health.TryRetryRemote(status.Key)
 			? IssueResolution.Ok(Strings.Issues.RemoteOffline.Resolved())
-			: IssueResolution.Failed(Strings.Issues.RemoteOffline.Unknown());
+			: IssueResolution.Failed(LocalizedText.FromLiteral(
+				status.Health.LastError ?? "The remote machine could not be retried."));
 	}
 
 	/// <summary>
@@ -79,24 +80,11 @@ internal sealed class RemoteHealthIssueProvider
 	public static UserNotificationRequest Notification(RemoteSourceStatus status) => new()
 	{
 		Key = IssueId(status.Key),
-		Title = Resolve(Strings.Issues.RemoteOffline.NotificationTitle()),
+		Title = LocalizedTexts.Resolve(Strings.Issues.RemoteOffline.NotificationTitle()),
 		Message = Describe(status),
 		Level = UserNotificationLevel.Warning,
 	};
 
 	private static string Describe(RemoteSourceStatus status) =>
 		$"{status.Name} ({status.Url}) is not answering: {status.Health.LastError ?? "no answer"}.";
-
-	private static string Resolve(LocalizedText text) =>
-		Resolver.Resolve(text, CultureInfo.CurrentUICulture.Name) ?? string.Empty;
-
-	private static readonly LocalizationResolver Resolver = CreateResolver();
-
-	private static LocalizationResolver CreateResolver()
-	{
-		var catalogs = new LocalizationCatalogRegistry();
-		catalogs.Register(Strings.LocalizationCatalog);
-
-		return new LocalizationResolver(catalogs);
-	}
 }

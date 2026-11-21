@@ -54,6 +54,13 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 	/// </summary>
 	private static readonly TimeSpan MinimumSnapshotLifetime = TimeSpan.FromSeconds(10);
 
+	/// <summary>
+	/// How often a remote whose sensors are not watched is still fetched for its health. Every configured
+	/// remote publishes online/status variables, so it has to be probed even when no reading is bound; a
+	/// slow probe keeps the old "an idle remote costs almost nothing" property.
+	/// </summary>
+	private static readonly TimeSpan HealthPollInterval = TimeSpan.FromSeconds(30);
+
 	private readonly RemoteSourceDefinition _definition;
 	private readonly ILogger _logger;
 	private readonly HttpClient _http;
@@ -68,14 +75,18 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 	private readonly SemaphoreSlim _wake = new(0, 1);
 
 	private IReadOnlyCollection<string>? _hardwareFilter;
+	private bool _hasFilter;
 	private IReadOnlyList<HardwareSensor> _snapshot = [];
 	private DateTimeOffset _snapshotAt;
 	private TimeSpan _pollingInterval = TimeSpan.FromSeconds(1);
 	private CancellationTokenSource? _loopCancellation;
 	private Task? _loop;
+	private bool _open;
 	private RemoteSourceHealth _health = RemoteSourceHealth.Unknown;
 	private int _failures;
 	private long _retryAt;
+	private long _lastAttempt;
+	private bool _forceRefresh;
 	private bool _disposed;
 
 	public RemoteHardwareSource(RemoteSourceDefinition definition, ILogger logger)
@@ -127,27 +138,45 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 	{
 		lock (_sync)
 		{
-			if (_disposed || _loop is not null)
+			if (_disposed)
 			{
 				return;
 			}
 
-			var cancellation = new CancellationTokenSource();
-			_loopCancellation = cancellation;
-			_loop = Task.Run(() => PollLoopAsync(cancellation), CancellationToken.None);
+			_open = true;
+
+			// The loop starts once and idles while the source is closed. Starting a second one on a
+			// Close/Open cycle would leave two timers racing over the same HTTP client.
+			if (_loop is null)
+			{
+				var cancellation = new CancellationTokenSource();
+				_loopCancellation = cancellation;
+				_loop = Task.Run(() => PollLoopAsync(cancellation), CancellationToken.None);
+			}
 		}
+
+		Wake();
 	}
 
 	/// <inheritdoc />
 	public void Close()
 	{
-		StopLoop();
-
 		lock (_sync)
 		{
+			if (_disposed)
+			{
+				return;
+			}
+
+			_open = false;
+			_hardwareFilter = null;
+			_hasFilter = false;
 			_snapshot = [];
 			_snapshotAt = default;
 		}
+
+		// Wake the loop so it notices it is closed instead of finishing an interval first.
+		Wake();
 	}
 
 	/// <inheritdoc />
@@ -164,7 +193,7 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 			}
 
 			_pollingInterval = normalized;
-			running = _loop is not null;
+			running = _loop is not null && _open;
 		}
 
 		// A shorter interval should not wait out the old one before it takes effect. Without a loop
@@ -181,6 +210,7 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 		lock (_sync)
 		{
 			_hardwareFilter = hardwareFilter;
+			_hasFilter = true;
 
 			if (_disposed || !Wanted(hardwareFilter) || _snapshot.Count == 0)
 			{
@@ -210,6 +240,7 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 
 			_hardwareFilter = null;
 			_retryAt = 0;
+			_forceRefresh = true;
 		}
 
 		RefreshAsync(CancellationToken.None).GetAwaiter().GetResult();
@@ -226,6 +257,7 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 		lock (_sync)
 		{
 			_retryAt = 0;
+			_forceRefresh = true;
 		}
 
 		Wake();
@@ -254,6 +286,7 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 			}
 
 			_disposed = true;
+			_open = false;
 			_snapshot = [];
 			cancellation = _loopCancellation;
 			_loopCancellation = null;
@@ -280,7 +313,7 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 	{
 		lock (_sync)
 		{
-			if (_disposed || !Wanted(_hardwareFilter) || Environment.TickCount64 < _retryAt)
+			if (_disposed || Environment.TickCount64 < _retryAt)
 			{
 				return false;
 			}
@@ -295,6 +328,12 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 				{
 					return false;
 				}
+
+				// A fetch is happening now: the health clock starts here, and a forced retry has been
+				// satisfied. It is set before the request so a request that gets cancelled still counts
+				// as an attempt and does not make the loop spin.
+				_lastAttempt = Environment.TickCount64;
+				_forceRefresh = false;
 			}
 
 			using var request = new HttpRequestMessage(HttpMethod.Get, _definition.Url);
@@ -375,13 +414,50 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 		{
 			while (!token.IsCancellationRequested)
 			{
-				bool wanted;
+				bool open;
 				lock (_sync)
 				{
-					wanted = !_disposed && Wanted(_hardwareFilter);
+					if (_disposed)
+					{
+						break;
+					}
+
+					open = _open;
 				}
 
-				if (wanted)
+				if (!open)
+				{
+					// Closed: park until Open wakes us. The loop stays alive so a Close/Open cycle does
+					// not race a second loop over the same client.
+					try
+					{
+						await _wake.WaitAsync(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+					}
+					catch (OperationCanceledException)
+					{
+						break;
+					}
+
+					continue;
+				}
+
+				bool wanted;
+				bool fetch;
+				lock (_sync)
+				{
+					// A watched remote is fetched at the configured rate. An unwatched one is still
+					// fetched for its health, but only every HealthPollInterval; that is what lets an
+					// unticked remote become Offline and be retried. No consumer has spoken yet before
+					// the first Read, so that counts as unwatched rather than "wants everything".
+					wanted = _hasFilter && Wanted(_hardwareFilter);
+					var now = Environment.TickCount64;
+					fetch = _forceRefresh
+						|| wanted
+						|| _failures > 0
+						|| now - _lastAttempt >= (long)HealthPollInterval.TotalMilliseconds;
+				}
+
+				if (fetch)
 				{
 					try
 					{
@@ -402,13 +478,23 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 				TimeSpan delay;
 				lock (_sync)
 				{
-					// Wait out whatever the last failure scheduled, and the normal interval otherwise. A
-					// timer that fires a moment early lands on a tiny remaining wait rather than a whole
-					// extra backoff step.
+					// Wait out whatever the last failure scheduled; otherwise a watched remote follows the
+					// polling rate and an unwatched one waits only for its next health probe. A timer that
+					// fires a moment early lands on a tiny remaining wait rather than a whole extra step.
 					var now = Environment.TickCount64;
-					delay = _retryAt > now
-						? TimeSpan.FromMilliseconds(_retryAt - now)
-						: _pollingInterval;
+					if (_retryAt > now)
+					{
+						delay = TimeSpan.FromMilliseconds(_retryAt - now);
+					}
+					else if (_hasFilter && Wanted(_hardwareFilter))
+					{
+						delay = _pollingInterval;
+					}
+					else
+					{
+						var remaining = (long)HealthPollInterval.TotalMilliseconds - (now - _lastAttempt);
+						delay = TimeSpan.FromMilliseconds(Math.Max(250, remaining));
+					}
 				}
 
 				try
@@ -478,20 +564,6 @@ public sealed class RemoteHardwareSource : IHardwareSensorSource, IRemoteHealthS
 		}
 
 		Publish(health, previous);
-	}
-
-	private void StopLoop()
-	{
-		CancellationTokenSource? cancellation;
-
-		lock (_sync)
-		{
-			cancellation = _loopCancellation;
-			_loopCancellation = null;
-			_loop = null;
-		}
-
-		cancellation?.Cancel();
 	}
 
 	private void Wake()

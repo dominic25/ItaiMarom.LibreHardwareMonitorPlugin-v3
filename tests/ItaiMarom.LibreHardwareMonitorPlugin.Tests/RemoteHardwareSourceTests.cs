@@ -53,20 +53,43 @@ public sealed class RemoteHardwareSourceTests
 	}
 
 	[Test]
-	public void A_watched_hardware_that_belongs_to_another_machine_is_not_requested()
+	public void A_remote_whose_sensors_are_not_watched_is_not_returned_but_is_still_health_polled()
 	{
 		var handler = new StubHandler(_ => Json(Document));
 		using var logger = new LoggerConfiguration().CreateLogger();
 		using var source = Create(handler, logger);
 
+		// Its sensors are not bound, so none of them may be published...
 		Assert.That(source.Read(["Office PC · CPU"]), Is.Empty);
-		Assert.That(Fetch(source), Is.False);
-		Assert.That(handler.Requests, Is.Zero);
-
-		Assert.That(source.Read(["Living Room · CPU"]), Is.Empty);
 		Assert.That(Fetch(source), Is.True);
+		Assert.That(source.Read(["Office PC · CPU"]), Is.Empty);
+		Assert.That(handler.Requests, Is.EqualTo(1));
+
+		// ...but the machine is still probed for its health, which is what makes an offline/online
+		// variable and its Retry action work for an unticked remote.
+		Assert.That(source.Health.State, Is.EqualTo(RemoteSourceState.Online));
+
+		// A watched read then serves the tree the health probe already fetched.
 		Assert.That(source.Read(["Living Room · CPU"]), Has.Count.EqualTo(1));
 		Assert.That(handler.Requests, Is.EqualTo(1));
+	}
+
+	[Test]
+	public void A_retry_for_an_unticked_remote_actually_fetches()
+	{
+		var handler = new StubHandler(_ => throw new HttpRequestException("unreachable"));
+		using var logger = new LoggerConfiguration().CreateLogger();
+		using var source = Create(handler, logger);
+
+		source.Read(["Office PC · CPU"]);
+		Assert.That(Fetch(source), Is.False);
+		Assert.That(handler.Requests, Is.EqualTo(1));
+
+		Assert.That(source.TryRetryRemote("living_room"), Is.True);
+		Assert.That(Fetch(source), Is.False);
+
+		// The retry bypassed the watched-sensor filter and issued a second request.
+		Assert.That(handler.Requests, Is.EqualTo(2));
 	}
 
 	[Test]

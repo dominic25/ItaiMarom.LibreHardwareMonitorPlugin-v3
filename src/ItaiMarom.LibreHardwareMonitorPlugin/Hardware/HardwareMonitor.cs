@@ -251,7 +251,20 @@ public sealed class HardwareMonitor : IAsyncDisposable
 	/// One lookup rather than two: the range belongs to the same sample as the value, and fetching them
 	/// separately could answer with a value from one poll and a range from another.
 	/// </remarks>
-	public bool TryGetReading(SensorIdentifier sensor, out double value, out ControlRange? control)
+	public bool TryGetReading(SensorIdentifier sensor, out double value, out ControlRange? control) =>
+		TryGetReading(sensor, out value, out control, out _);
+
+	/// <summary>
+	/// The same reading with the moment the poll that produced it finished. The event evaluator needs the
+	/// sample time rather than the cache's presence: a reading stays visible for <see cref="HardwareMonitorOptions.StaleAfter"/>
+	/// after it was last sampled, and a "no reading" event must count from the last sample, not from when
+	/// the cache finally drops it.
+	/// </summary>
+	public bool TryGetReading(
+		SensorIdentifier sensor,
+		out double value,
+		out ControlRange? control,
+		out DateTimeOffset sampledAt)
 	{
 		lock (_sync)
 		{
@@ -259,12 +272,14 @@ public sealed class HardwareMonitor : IAsyncDisposable
 			{
 				value = reading.Value;
 				control = reading.Control;
+				sampledAt = reading.SampledAt;
 				return true;
 			}
 		}
 
 		value = 0;
 		control = null;
+		sampledAt = default;
 		return false;
 	}
 
@@ -368,31 +383,14 @@ public sealed class HardwareMonitor : IAsyncDisposable
 		return await WithHardwareAsync(
 			source =>
 			{
-				var controls = source.ReadControls();
-				var failed = new List<string>();
-
-				foreach (var control in controls)
-				{
-					try
-					{
-						if (!source.ResetControl(control.Id))
-						{
-							failed.Add(control.Id);
-						}
-					}
-					catch (Exception exception)
-					{
-						_logger.Debug(exception, "The control of {SensorId} could not be reset.", control.Id);
-						failed.Add(control.Id);
-					}
-				}
+				var result = ControlReset.ResetAll(source.ReadControls(), source.ResetControl, _logger);
 
 				lock (_sync)
 				{
 					_softwareControls.Clear();
 				}
 
-				return new ControlResetResult(controls.Count - failed.Count, failed);
+				return result;
 			},
 			cancellationToken).ConfigureAwait(false);
 	}

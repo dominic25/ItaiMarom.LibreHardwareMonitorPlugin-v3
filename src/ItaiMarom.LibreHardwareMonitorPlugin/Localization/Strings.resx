@@ -166,6 +166,12 @@
   <data name="Variables.Remote.Unknown" xml:space="preserve">
     <value>Connecting</value>
   </data>
+  <data name="Variables.Remote.OnlineLabel" xml:space="preserve">
+    <value>online</value>
+  </data>
+  <data name="Variables.Remote.StatusLabel" xml:space="preserve">
+    <value>status</value>
+  </data>
   <data name="Variables.Remote.OnlineDescription" xml:space="preserve">
     <value>Whether this remote machine is answering. True while it is online, false once it has failed repeatedly.</value>
   </data>

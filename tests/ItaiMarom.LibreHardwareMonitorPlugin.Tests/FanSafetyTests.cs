@@ -80,6 +80,29 @@ public sealed class FanSafetyTests
 	}
 
 	[Test]
+	public async Task The_exit_restore_runs_once_even_after_dispose()
+	{
+		var fan = TestFanActions.Control("Fan #1") with { Controllable = true };
+		var source = new FakeHardwareSensorSource().AddControl(fan, value: 50f);
+		using var logger = new LoggerConfiguration().CreateLogger();
+		var integration = new LibreHardwareMonitorIntegration(
+			logger,
+			source,
+			new Variables.SensorSelection(),
+			FakeAccessDiagnosis.Reachable(),
+			new RecordingCatalogNotifier());
+
+		await integration.InitializeAsync(new MacroDeck.Plugin.Testing.Fakes.FakeIntegrationContext());
+
+		await integration.RestoreFansOnExitAsync();
+		await integration.RestoreFansOnExitAsync();
+		Assert.That(source.ResetCount, Is.EqualTo(1));
+
+		await integration.DisposeAsync();
+		Assert.That(source.ResetCount, Is.EqualTo(1));
+	}
+
+	[Test]
 	public async Task Stopping_the_plugin_hands_the_fans_back_by_default()
 	{
 		var fan = TestFanActions.Control("Fan #1") with { Controllable = true };

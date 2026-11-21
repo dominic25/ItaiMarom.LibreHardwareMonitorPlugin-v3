@@ -51,9 +51,9 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	private IReadOnlyList<SensorIdentifier>? _eagerFor;
 	private IReadOnlyDictionary<SensorType, SensorUnit>? _eagerDefaults;
 
-	private List<ExtraVariable>? _extras;
-	private IReadOnlyList<RemoteSourceDefinition>? _extrasForRemotes;
-	private IReadOnlyList<SensorIdentifier>? _extrasForSensors;
+	private List<StatusVariable>? _statusVariables;
+	private IReadOnlyList<RemoteSourceDefinition>? _statusForRemotes;
+	private IReadOnlyList<SensorIdentifier>? _statusForSensors;
 
 	public SensorVariableProvider(
 		HardwareMonitor monitor,
@@ -95,7 +95,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 			return
 			[
 				.. EagerVariables().Select(variable => variable.EagerDefinition(interval)),
-				.. ExtraVariables().Select(variable => variable.Definition(interval)),
+				.. StatusVariables().Select(variable => variable.Definition(interval)),
 			];
 		}
 	}
@@ -142,9 +142,9 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	/// </remarks>
 	public ValueTask<VariableReading> ReadAsync(string localId, CancellationToken cancellationToken = default)
 	{
-		if (ExtraVariables().FirstOrDefault(variable => string.Equals(variable.Id, localId, StringComparison.Ordinal)) is { } extra)
+		if (StatusVariables().FirstOrDefault(variable => string.Equals(variable.Id, localId, StringComparison.Ordinal)) is { } status)
 		{
-			return new ValueTask<VariableReading>(extra.Read());
+			return new ValueTask<VariableReading>(status.Read());
 		}
 
 		if (!TryResolveSensor(localId, out var sensor)
@@ -268,9 +268,9 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 			}
 		}
 
-		if (ExtraVariables().FirstOrDefault(variable => string.Equals(variable.Id, localId, StringComparison.Ordinal)) is { } extra)
+		if (StatusVariables().FirstOrDefault(variable => string.Equals(variable.Id, localId, StringComparison.Ordinal)) is { } status)
 		{
-			return new ValueTask<VariableDefinition?>(extra.Definition(interval));
+			return new ValueTask<VariableDefinition?>(status.Definition(interval));
 		}
 
 		if (!VariableNaming.IsValidResourceId(localId))
@@ -369,7 +369,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	/// are on. They carry the same test-build prefix as every declared name, because Macro Deck's variable
 	/// names are global.
 	/// </summary>
-	private List<ExtraVariable> ExtraVariables()
+	private List<StatusVariable> StatusVariables()
 	{
 		// Built once per selection and remote list rather than once per read: every sensor read asks for
 		// these first, and a machine with a few hundred variables would otherwise rebuild the same list
@@ -377,21 +377,21 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 		var remotes = _remotes?.Remotes;
 		var sensors = _selection.Sensors;
 
-		if (_extras is { } cached
-			&& ReferenceEquals(remotes, _extrasForRemotes)
-			&& ReferenceEquals(sensors, _extrasForSensors))
+		if (_statusVariables is { } cached
+			&& ReferenceEquals(remotes, _statusForRemotes)
+			&& ReferenceEquals(sensors, _statusForSensors))
 		{
 			return cached;
 		}
 
-		var extras = new List<ExtraVariable>();
+		var statuses = new List<StatusVariable>();
 		var used = new HashSet<string>(EagerVariables().Select(variable => variable.Name), StringComparer.Ordinal);
 
 		if (_elevation is not null)
 		{
-			extras.Add(new ExtraVariable(
+			statuses.Add(new StatusVariable(
 				VariableNaming.ToDeclaredId("elevated-readings"),
-				UniqueName(SensorVariableNaming.Prefix + "elevated_readings", used),
+				SensorVariableNaming.UniqueName(SensorVariableNaming.Prefix + "elevated_readings", used),
 				VariableType.Boolean,
 				Strings.Variables.Elevated.DisplayName(),
 				Strings.Variables.Elevated.Description(),
@@ -400,64 +400,52 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 
 		if (_remotes is null || _remoteHealth is null)
 		{
-			_extras = extras;
-			_extrasForRemotes = remotes;
-			_extrasForSensors = sensors;
-			return extras;
+			_statusVariables = statuses;
+			_statusForRemotes = remotes;
+			_statusForSensors = sensors;
+			return statuses;
 		}
 
 		foreach (var remote in _remotes.Remotes)
 		{
 			var key = remote.Key;
+			var onlineLabel = LocalizedTexts.Resolve(Strings.Variables.Remote.OnlineLabel());
+			var statusLabel = LocalizedTexts.Resolve(Strings.Variables.Remote.StatusLabel());
 
-			extras.Add(new ExtraVariable(
+			statuses.Add(new StatusVariable(
 				VariableNaming.ToDeclaredId($"remote-{key}-online"),
-				UniqueName(SensorVariableNaming.Prefix + key + "_online", used),
+				SensorVariableNaming.UniqueName(SensorVariableNaming.Prefix + key + "_online", used),
 				VariableType.Boolean,
-				LocalizedText.FromLiteral($"{remote.Name} online"),
+				LocalizedText.FromLiteral($"{remote.Name} {onlineLabel}"),
 				Strings.Variables.Remote.OnlineDescription(),
 				() => VariableReading.Of(HealthOf(key).IsOnline)));
 
-			extras.Add(new ExtraVariable(
+			statuses.Add(new StatusVariable(
 				VariableNaming.ToDeclaredId($"remote-{key}-status"),
-				UniqueName(SensorVariableNaming.Prefix + key + "_status", used),
+				SensorVariableNaming.UniqueName(SensorVariableNaming.Prefix + key + "_status", used),
 				VariableType.Text,
-				LocalizedText.FromLiteral($"{remote.Name} status"),
+				LocalizedText.FromLiteral($"{remote.Name} {statusLabel}"),
 				Strings.Variables.Remote.StatusDescription(),
 				() => VariableReading.Of(StatusText(HealthOf(key)))));
 		}
 
-		_extras = extras;
-		_extrasForRemotes = remotes;
-		_extrasForSensors = sensors;
-		return extras;
+		_statusVariables = statuses;
+		_statusForRemotes = remotes;
+		_statusForSensors = sensors;
+		return statuses;
 	}
 
 	private RemoteSourceHealth HealthOf(string key) =>
-		_remoteHealth?.RemoteStatuses
-			.FirstOrDefault(status => string.Equals(status.Key, key, StringComparison.Ordinal))
-			?.Health
-		?? RemoteSourceHealth.Unknown;
+		_remoteHealth?.Find(key)?.Health ?? RemoteSourceHealth.Unknown;
 
 	private static string StatusText(RemoteSourceHealth health) =>
 		health.State switch
 		{
-			RemoteSourceState.Online => Resolve(Strings.Variables.Remote.Online()),
-			RemoteSourceState.Offline => Resolve(Strings.Variables.Remote.Offline()),
-			RemoteSourceState.Degraded => Resolve(Strings.Variables.Remote.Reconnecting()),
-			_ => Resolve(Strings.Variables.Remote.Unknown()),
+			RemoteSourceState.Online => LocalizedTexts.Resolve(Strings.Variables.Remote.Online()),
+			RemoteSourceState.Offline => LocalizedTexts.Resolve(Strings.Variables.Remote.Offline()),
+			RemoteSourceState.Degraded => LocalizedTexts.Resolve(Strings.Variables.Remote.Reconnecting()),
+			_ => LocalizedTexts.Resolve(Strings.Variables.Remote.Unknown()),
 		};
-
-	private static string UniqueName(string name, HashSet<string> used)
-	{
-		var candidate = name;
-		for (var suffix = 2; !used.Add(candidate); suffix++)
-		{
-			candidate = $"{name}_{suffix.ToString(CultureInfo.InvariantCulture)}";
-		}
-
-		return candidate;
-	}
 
 	private bool TryResolveSensor(string localId, out SensorIdentifier sensor)
 	{
@@ -661,7 +649,7 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 	}
 
 	/// <summary>One variable that is not a sensor: a definition, and the value it reports.</summary>
-	private sealed record ExtraVariable(
+	private sealed record StatusVariable(
 		string Id,
 		string Name,
 		VariableType Type,
@@ -677,20 +665,6 @@ public sealed class SensorVariableProvider : IVariableProvider, IDisposable
 				Description = Description,
 			};
 	}
-
-	/// <summary>Carries the localized words a notification or a text variable needs.</summary>
-	private static readonly LocalizationResolver Resolver = CreateResolver();
-
-	private static LocalizationResolver CreateResolver()
-	{
-		var catalogs = new LocalizationCatalogRegistry();
-		catalogs.Register(Strings.LocalizationCatalog);
-
-		return new LocalizationResolver(catalogs);
-	}
-
-	private static string Resolve(LocalizedText text) =>
-		Resolver.Resolve(text, CultureInfo.CurrentUICulture.Name) ?? string.Empty;
 
 	private sealed record CatalogSnapshot(SensorCatalogTable Table, DateTimeOffset BuiltAt);
 }

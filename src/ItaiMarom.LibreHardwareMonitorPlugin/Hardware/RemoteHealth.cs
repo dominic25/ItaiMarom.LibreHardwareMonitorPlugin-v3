@@ -60,6 +60,10 @@ public interface IRemoteHealthSource
 	/// <summary>Every configured remote machine, in the order it was configured.</summary>
 	IReadOnlyList<RemoteSourceStatus> RemoteStatuses { get; }
 
+	/// <summary>The status of one machine, or null when no configured remote has that key.</summary>
+	RemoteSourceStatus? Find(string key) =>
+		RemoteStatuses.FirstOrDefault(status => string.Equals(status.Key, key, StringComparison.Ordinal));
+
 	/// <summary>
 	/// Clears a machine's backoff and asks the next refresh to happen now. Returns false when no remote
 	/// has that key.

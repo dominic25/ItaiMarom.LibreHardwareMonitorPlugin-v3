@@ -529,7 +529,7 @@ public sealed class LibreHardwareMonitorIntegration :
 	/// the process-exit hook: the host's stop path does not necessarily dispose the integration, and a
 	/// fan left at a written speed with nothing able to undo it is the failure this guards against.
 	/// </summary>
-	private async Task RestoreFansOnExitAsync()
+	internal async Task RestoreFansOnExitAsync()
 	{
 		if (!_restoreFansOnExit
 			|| Volatile.Read(ref _initialized) == 0

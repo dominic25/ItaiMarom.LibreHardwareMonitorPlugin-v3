@@ -42,6 +42,22 @@ public static class SensorVariableNaming
 	/// </summary>
 	internal static string Prefix => NamePrefix;
 
+	/// <summary>
+	/// Makes a name unique within <paramref name="used"/> by suffixing a counter, and records it there.
+	/// Shared by the sensor selection and the health/elevation variables so both settle a collision the
+	/// same way.
+	/// </summary>
+	internal static string UniqueName(string name, HashSet<string> used)
+	{
+		var candidate = name;
+		for (var suffix = 2; !used.Add(candidate); suffix++)
+		{
+			candidate = $"{name}_{suffix.ToString(CultureInfo.InvariantCulture)}";
+		}
+
+		return candidate;
+	}
+
 	/// <summary>Assigns a unique name and id to every sensor in <paramref name="sensors"/>.</summary>
 	public static IReadOnlyList<SensorVariable> Assign(IEnumerable<SensorIdentifier> sensors)
 	{

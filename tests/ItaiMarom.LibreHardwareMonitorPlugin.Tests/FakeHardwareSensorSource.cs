@@ -45,6 +45,9 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource, IAccessN
 	/// <summary>The sensor id handed to the most recent <see cref="ResetControl"/>, or null.</summary>
 	public string? LastResetSensorId { get; private set; }
 
+	/// <summary>How many times a control was handed back to the hardware.</summary>
+	public int ResetCount { get; private set; }
+
 	public bool IsOpen { get; private set; }
 
 	/// <summary>What the source reports it still cannot read, when a test wants an elevated note.</summary>
@@ -209,6 +212,7 @@ internal sealed class FakeHardwareSensorSource : IHardwareSensorSource, IAccessN
 
 		_controls[sensor] = control with { Mode = ControlMode.Default };
 		LastResetSensorId = sensorId;
+		ResetCount++;
 		return true;
 	}
 

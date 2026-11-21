@@ -904,13 +904,6 @@ internal static class ClassicWindowPage
 	}
 
 	/// <summary>
-	/// The one thing that is wrong with the machine rather than with the selection, put under the heading:
-	/// readings the hardware library's kernel driver would have produced and this process cannot reach.
-	/// The sentence says why they are missing and what to do about it; the lead says that something is,
-	/// so the line reads as a warning rather than as small print. Nothing at all when there is nothing to
-	/// say, which is the usual case.
-	/// </summary>
-	/// <summary>
 	/// The elevation status beside the toolbar. The helper is one-way today unless the user can stop it,
 	/// so when it is running this is where that is said and where it is undone.
 	/// </summary>
@@ -919,6 +912,13 @@ internal static class ClassicWindowPage
 			? "<span class=\"elevated\">Elevated readings are on <button type=\"button\" id=\"stopHelper\" title=\"Stop the administrator helper for this session. Fans it is driving are handed back first.\">Stop helper</button></span>"
 			: string.Empty;
 
+	/// <summary>
+	/// The one thing that is wrong with the machine rather than with the selection, put under the heading:
+	/// readings the hardware library's kernel driver would have produced and this process cannot reach.
+	/// The sentence says why they are missing and what to do about it; the lead says that something is,
+	/// so the line reads as a warning rather than as small print. Nothing at all when there is nothing to
+	/// say, which is the usual case.
+	/// </summary>
 	private static string RenderNotice(string? notice) =>
 		string.IsNullOrWhiteSpace(notice)
 			? string.Empty

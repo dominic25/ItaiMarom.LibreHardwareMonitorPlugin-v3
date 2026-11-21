@@ -126,6 +126,11 @@ public sealed class EventEvaluatorTests
 
 		await fixture.SetValueAsync(null);
 		fixture.Now = fixture.Now.AddSeconds(31);
+
+		// The cache still holds the last sample: the event has to count from that sample, not wait for
+		// StaleAfter to drop it and then start the grace window.
+		Assert.That(fixture.Monitor.TryGetReading(fixture.Sensor, out _), Is.True);
+
 		fixture.Evaluator.Evaluate();
 
 		Assert.That(fixture.Publisher.Published, Has.Count.EqualTo(1));
@@ -254,7 +259,9 @@ public sealed class EventEvaluatorTests
 				new HardwareMonitorOptions
 				{
 					PollingInterval = TimeSpan.FromMilliseconds(10),
-					StaleAfter = TimeSpan.FromMilliseconds(100),
+					// Long enough that the stopped-sensor test still has the last sample in the cache
+					// when it advances its clock past the grace.
+					StaleAfter = TimeSpan.FromSeconds(1),
 				},
 				_logger);
 			Elevation = new FakeElevatableSource();
@@ -287,6 +294,9 @@ public sealed class EventEvaluatorTests
 			Monitor.SetWatchedSensors([Sensor]);
 			Monitor.Start();
 			await WaitUntilAsync(() => Monitor.TryGetReading(Sensor, out _));
+
+			// Align the fake clock with the sample so a stopped-sensor grace measures from that sample.
+			Now = DateTimeOffset.UtcNow;
 		}
 
 		public async Task SetValueAsync(float? value)
@@ -295,7 +305,6 @@ public sealed class EventEvaluatorTests
 
 			if (value is null)
 			{
-				await WaitUntilAsync(() => !Monitor.TryGetReading(Sensor, out _));
 				return;
 			}
 

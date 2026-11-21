@@ -138,23 +138,8 @@ internal sealed class MissingReadingsIssueProvider
 	internal static UserNotificationRequest Notification(string note) => new()
 	{
 		Key = IssueId,
-		Title = Resolver.Resolve(Strings.Issues.ReadingsMissing.Title(), CultureInfo.CurrentUICulture.Name),
+		Title = LocalizedTexts.Resolve(Strings.Issues.ReadingsMissing.Title()),
 		Message = note,
 		Level = UserNotificationLevel.Warning,
 	};
-
-	/// <summary>
-	/// What turns the catalog's keys into words. The host does that for the issue, but a notification is
-	/// carried as strings, so this plugin has to do it itself - against the one catalog it ships, which
-	/// <c>UseLocalization</c> also registers with the host, and in whatever language this process is in.
-	/// </summary>
-	private static readonly LocalizationResolver Resolver = CreateResolver();
-
-	private static LocalizationResolver CreateResolver()
-	{
-		var catalogs = new LocalizationCatalogRegistry();
-		catalogs.Register(Strings.LocalizationCatalog);
-
-		return new LocalizationResolver(catalogs);
-	}
 }

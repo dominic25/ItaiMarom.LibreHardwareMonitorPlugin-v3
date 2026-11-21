@@ -116,12 +116,12 @@ internal static class HardwareEvents
 		],
 		PayloadParameters =
 		[
-			PayloadText(PayloadSensorName, Strings.Events.Payload.Sensor.Label(), Strings.Events.Payload.Sensor.Description()),
-			PayloadText(PayloadSensorId, Strings.Events.Payload.SensorId.Label(), Strings.Events.Payload.SensorId.Description()),
-			PayloadNumber(PayloadValue, Strings.Events.Payload.Value.Label(), Strings.Events.Payload.Value.Description()),
-			PayloadNumber(ThresholdParameter, Strings.Events.Payload.Threshold.Label(), Strings.Events.Payload.Threshold.Description()),
-			PayloadText(PayloadUnit, Strings.Events.Payload.Unit.Label(), Strings.Events.Payload.Unit.Description()),
-			PayloadText(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
+			ActionParameter.Text(PayloadSensorName, Strings.Events.Payload.Sensor.Label(), Strings.Events.Payload.Sensor.Description()),
+			ActionParameter.Text(PayloadSensorId, Strings.Events.Payload.SensorId.Label(), Strings.Events.Payload.SensorId.Description()),
+			ActionParameter.Number(PayloadValue, Strings.Events.Payload.Value.Label(), Strings.Events.Payload.Value.Description()),
+			ActionParameter.Number(ThresholdParameter, Strings.Events.Payload.Threshold.Label(), Strings.Events.Payload.Threshold.Description()),
+			ActionParameter.Text(PayloadUnit, Strings.Events.Payload.Unit.Label(), Strings.Events.Payload.Unit.Description()),
+			ActionParameter.Text(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
 		],
 	};
 
@@ -146,10 +146,10 @@ internal static class HardwareEvents
 		],
 		PayloadParameters =
 		[
-			PayloadText(PayloadSensorName, Strings.Events.Payload.Sensor.Label(), Strings.Events.Payload.Sensor.Description()),
-			PayloadText(PayloadSensorId, Strings.Events.Payload.SensorId.Label(), Strings.Events.Payload.SensorId.Description()),
-			PayloadNumber(PayloadSeconds, Strings.Events.Payload.Seconds.Label(), Strings.Events.Payload.Seconds.Description()),
-			PayloadText(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
+			ActionParameter.Text(PayloadSensorName, Strings.Events.Payload.Sensor.Label(), Strings.Events.Payload.Sensor.Description()),
+			ActionParameter.Text(PayloadSensorId, Strings.Events.Payload.SensorId.Label(), Strings.Events.Payload.SensorId.Description()),
+			ActionParameter.Number(PayloadSeconds, Strings.Events.Payload.Seconds.Label(), Strings.Events.Payload.Seconds.Description()),
+			ActionParameter.Text(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
 		],
 	};
 
@@ -163,9 +163,9 @@ internal static class HardwareEvents
 		ConfigurationParameters = [MachineChoice()],
 		PayloadParameters =
 		[
-			PayloadText(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
-			PayloadText(PayloadUrl, Strings.Events.Payload.Url.Label(), Strings.Events.Payload.Url.Description()),
-			PayloadText(PayloadError, Strings.Events.Payload.Error.Label(), Strings.Events.Payload.Error.Description()),
+			ActionParameter.Text(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
+			ActionParameter.Text(PayloadUrl, Strings.Events.Payload.Url.Label(), Strings.Events.Payload.Url.Description()),
+			ActionParameter.Text(PayloadError, Strings.Events.Payload.Error.Label(), Strings.Events.Payload.Error.Description()),
 		],
 	};
 
@@ -179,8 +179,8 @@ internal static class HardwareEvents
 		ConfigurationParameters = [MachineChoice()],
 		PayloadParameters =
 		[
-			PayloadText(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
-			PayloadText(PayloadUrl, Strings.Events.Payload.Url.Label(), Strings.Events.Payload.Url.Description()),
+			ActionParameter.Text(PayloadMachineName, Strings.Events.Payload.Machine.Label(), Strings.Events.Payload.Machine.Description()),
+			ActionParameter.Text(PayloadUrl, Strings.Events.Payload.Url.Label(), Strings.Events.Payload.Url.Description()),
 		],
 	};
 
@@ -194,7 +194,7 @@ internal static class HardwareEvents
 		ConfigurationParameters = [],
 		PayloadParameters =
 		[
-			PayloadToggle(
+			ActionParameter.Toggle(
 				PayloadElevated,
 				Strings.Events.Payload.Elevated.Label(),
 				Strings.Events.Payload.Elevated.Description()),
@@ -220,13 +220,4 @@ internal static class HardwareEvents
 				placeholder: Strings.Events.Machine.Placeholder(),
 				required: true)
 			.AsSearchable();
-
-	private static ActionParameter PayloadText(string name, LocalizedText label, LocalizedText description) =>
-		ActionParameter.Text(name, label, description);
-
-	private static ActionParameter PayloadNumber(string name, LocalizedText label, LocalizedText description) =>
-		ActionParameter.Number(name, label, description);
-
-	private static ActionParameter PayloadToggle(string name, LocalizedText label, LocalizedText description) =>
-		ActionParameter.Toggle(name, label, description);
 }

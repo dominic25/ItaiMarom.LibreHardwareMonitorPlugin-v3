@@ -157,8 +157,10 @@ plus every configured remote one:
   name (`Living Room · AMD Ryzen 7 5800X`) and nothing that has to remain stable.
 - **Local variable names are unchanged.** Remote variable names put the sanitized key in front of the
   legacy name (`living_room_cpu_total_load`), which is what keeps two machines with a `CPU Total` apart.
-- **Idle remotes cost nothing.** The poll hands each source the watched root-hardware names. A remote whose
-  label is not among them is skipped before any network call.
+- **An idle remote costs one slow health probe.** The poll hands each source the watched root-hardware
+  names, and an unwatched remote is not fetched at the polling rate. It is still fetched every 30 seconds
+  for its online/status variables and its **Retry now** button, so a machine with no ticked sensors can
+  still go Offline and recover. A retry forces a fetch even for an unticked remote.
 - **The list is live.** Remote definitions are stored under `remote_sources` in the same configuration
   entry as the sensors. `InitializeAsync` applies them through `IRemoteSourceController` before the loop
   starts, so a saved change takes effect without a restart. The window's sensor tree is built when it
@@ -312,8 +314,9 @@ the last time a sensor answered, the last online/elevation state - and publishes
 - A threshold has to hold for its dwell before it fires. Once it has fired it stays active until the
   reading clears the threshold by the hysteresis amount, in the opposite direction. Publishing while it
   stays past the line would turn a notification into a stream.
-- A stopped sensor fires once after its grace, then resets when a reading comes back. A sensor that was
-  never seen does not fire at startup.
+- A stopped sensor fires once after its grace, then resets when a reading comes back. The grace runs from
+  the last sample's own timestamp, not from when `StaleAfter` finally drops that reading from the cache;
+  otherwise every grace would gain the stale window. A sensor that was never seen does not fire at startup.
 - Remote and elevation events seed their state on the first observation and publish on the next change,
   so starting Macro Deck while a machine is already offline is not an event.
 - Payload values are the names the automation reads afterwards (`sensorName`, `sensorId`, `machineName`,

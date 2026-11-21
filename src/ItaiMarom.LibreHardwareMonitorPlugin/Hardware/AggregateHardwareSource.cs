@@ -157,15 +157,34 @@ public sealed class AggregateHardwareSource :
 	/// <inheritdoc />
 	public void Rescan()
 	{
+		IHardwareSensorSource local;
+		RemoteEntry[] remotes;
+
 		lock (_sync)
 		{
 			ThrowIfDisposed();
+			local = _local;
+			remotes = [.. _remotes];
+		}
 
-			_local.Rescan();
+		// No lock is held across the hardware library or the remotes' HTTP calls. A remote list change
+		// can dispose one of these sources while the rescan runs; that is reported and skipped, not a
+		// reason to hold the lock that the health and variable reads need.
+		local.Rescan();
 
-			foreach (var remote in _remotes)
+		foreach (var remote in remotes)
+		{
+			try
 			{
 				remote.Source.Rescan();
+			}
+			catch (ObjectDisposedException)
+			{
+				// The remote was removed while the rescan was running.
+			}
+			catch (Exception exception)
+			{
+				_logger.Debug(exception, "A remote hardware source could not be rescanned.");
 			}
 		}
 	}
@@ -310,19 +329,12 @@ public sealed class AggregateHardwareSource :
 	}
 
 	private RemoteSourceStatus StatusOf(RemoteEntry entry) =>
-		entry.Source is IRemoteHealthSource health
-			? health.RemoteStatuses.FirstOrDefault(status =>
-				string.Equals(status.Key, entry.Definition.Key, StringComparison.Ordinal))
-				?? new RemoteSourceStatus(
-					entry.Definition.Key,
-					entry.Definition.Name,
-					entry.Definition.Url,
-					RemoteSourceHealth.Unknown)
-			: new RemoteSourceStatus(
-				entry.Definition.Key,
-				entry.Definition.Name,
-				entry.Definition.Url,
-				RemoteSourceHealth.Unknown);
+		(entry.Source as IRemoteHealthSource)?.Find(entry.Definition.Key)
+		?? new RemoteSourceStatus(
+			entry.Definition.Key,
+			entry.Definition.Name,
+			entry.Definition.Url,
+			RemoteSourceHealth.Unknown);
 
 	private void OnRemoteHealthChanged(object? sender, RemoteHealthChangedEventArgs args)
 	{
@@ -396,8 +408,7 @@ public sealed class AggregateHardwareSource :
 					0)),
 		];
 
-		public bool TryRetryRemote(string key) =>
-			string.Equals(key, _definition.Key, StringComparison.Ordinal);
+		public bool TryRetryRemote(string key) => false;
 
 		public void Open()
 		{

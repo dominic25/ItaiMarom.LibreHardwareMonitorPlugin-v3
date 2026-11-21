@@ -101,12 +101,13 @@ Every remote also publishes two variables of its own, whether or not you tick an
   it to a tile's state mapping, or test it in a flow.
 - `living_room_status` - `Online`, `Reconnecting`, `Offline` or `Connecting`, for a label.
 
-A remote is polled in the background, so a sleeping PC cannot hold up this machine's readings. While it
-is unreachable the machine's branch in the sensor window carries an **offline** badge with the last
-error, Macro Deck's issue list shows one issue per offline machine with a **Retry now** button, and one
-notification is raised when it goes down (not on every retry). Coming back clears the issue and dismisses
-the notification by itself. A machine that was already asleep when Macro Deck started shows the issue and
-the flag but does not notify, because it was never online in that session.
+A remote is polled in the background, so a sleeping PC cannot hold up this machine's readings. Even a
+machine whose sensors you have not ticked is checked every 30 seconds for its online/status variables.
+While it is unreachable the machine's branch in the sensor window carries an **offline** badge with the
+last error, Macro Deck's issue list shows one issue per offline machine with a **Retry now** button, and
+one notification is raised when it goes down (not on every retry). Coming back clears the issue and
+dismisses the notification by itself. A machine that was already asleep when Macro Deck started shows the
+issue and the flag but does not notify, because it was never online in that session.
 
 Three badges explain what a sensor can be used for:
 

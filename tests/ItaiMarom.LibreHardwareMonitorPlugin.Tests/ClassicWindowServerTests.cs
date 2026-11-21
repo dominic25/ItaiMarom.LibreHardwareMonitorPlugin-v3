@@ -637,6 +637,47 @@ public sealed class ClassicWindowServerTests
 	}
 
 	[Test]
+	public async Task A_rescan_keeps_the_unsaved_ticks_and_preferences()
+	{
+		await using var server = new ClassicWindowServer(
+			new LoggerConfiguration().CreateLogger(),
+			_readings,
+			rebuild: (opening, _) => Task.FromResult(opening with
+			{
+				Categories = SensorCategory.Build([CpuCore1, CpuCore2]),
+			}));
+		var opened = server.Open(new ClassicWindowOpening(
+			"Libre Hardware Monitor",
+			SensorCategory.Build([CpuCore1]),
+			[CpuCore1.ResourceId],
+			1000,
+			10,
+			10000,
+			RedirectUri,
+			State));
+
+		await WindowClient.PostForJsonAsync(
+			new Uri(opened.PageUri, $"/rescan?s={opened.Key}"),
+			[
+				new KeyValuePair<string, string>("sensors", CpuCore1.ResourceId),
+				new KeyValuePair<string, string>("polling", "500"),
+				new KeyValuePair<string, string>("auto_elevate", "1"),
+				new KeyValuePair<string, string>("restore_fans", "1"),
+			]);
+
+		var page = await WindowClient.ReadPageAsync(opened.PageUri);
+
+		// The page posted the form as it stood, so the rebuilt tree opens on the same ticks and the two
+		// preferences rather than resetting to the saved configuration.
+		Assert.That(
+			page,
+			Does.Contain($"name=\"sensors\" value=\"{CpuCore1.ResourceId}\" checked"));
+		Assert.That(page, Does.Match("id=\"polling\"[^>]*value=\"500\""));
+		Assert.That(page, Does.Contain("name=\"auto_elevate\" value=\"1\" checked"));
+		Assert.That(page, Does.Contain("name=\"restore_fans\" value=\"1\" checked"));
+	}
+
+	[Test]
 	public async Task The_window_can_stop_the_elevated_helper()
 	{
 		using var elevation = new FakeElevatableSource(elevated: true);

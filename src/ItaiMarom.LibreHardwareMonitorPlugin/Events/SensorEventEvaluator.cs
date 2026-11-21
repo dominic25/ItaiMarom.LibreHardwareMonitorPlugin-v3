@@ -225,12 +225,20 @@ internal sealed class SensorEventEvaluator
 		}
 
 		var grace = TimeSpan.FromSeconds(Math.Max(0, Number(binding, HardwareEvents.GraceParameter) ?? 30));
+		var hasReading = _monitor.TryGetReading(sensor, out _, out _, out var sampledAt);
 
-		if (_monitor.TryGetReading(sensor, out _))
+		if (hasReading)
 		{
-			state.LastSeen = now;
-			state.StoppedFired = false;
-			return;
+			// A reading stays in the cache for StaleAfter after it was last sampled. The grace is about
+			// the last sample, not about the cache, so keep the sample's own time and only treat a fresh
+			// one as proof the sensor is still reporting.
+			state.LastSeen = sampledAt;
+
+			if (grace <= TimeSpan.Zero || now - sampledAt < grace)
+			{
+				state.StoppedFired = false;
+				return;
+			}
 		}
 
 		if (state.LastSeen is not { } lastSeen || state.StoppedFired || now - lastSeen < grace)
@@ -254,8 +262,7 @@ internal sealed class SensorEventEvaluator
 		BindingState state)
 	{
 		if (Text(binding, HardwareEvents.MachineParameter) is not { } key
-			|| _remoteHealth?.RemoteStatuses.FirstOrDefault(status =>
-				string.Equals(status.Key, key, StringComparison.Ordinal)) is not { } status)
+			|| _remoteHealth?.Find(key) is not { } status)
 		{
 			return;
 		}
@@ -380,13 +387,10 @@ internal sealed class SensorEventEvaluator
 	{
 		if (sensor.Hardware.Source is not { } source)
 		{
-			return Resolve(Strings.Events.ThisMachine());
+			return LocalizedTexts.Resolve(Strings.Events.ThisMachine());
 		}
 
-		return _remoteHealth?.RemoteStatuses
-			.FirstOrDefault(status => string.Equals(status.Key, source, StringComparison.Ordinal))
-			?.Name
-			?? source;
+		return _remoteHealth?.Find(source)?.Name ?? source;
 	}
 
 	private void Publish(
@@ -410,13 +414,10 @@ internal sealed class SensorEventEvaluator
 		}
 	}
 
-	private static bool IsOurs(EventBinding binding) =>
-		binding.EventId is
-			HardwareEvents.ThresholdId or
-			HardwareEvents.StoppedId or
-			HardwareEvents.RemoteOfflineId or
-			HardwareEvents.RemoteOnlineId or
-			HardwareEvents.ElevationChangedId;
+	private static readonly HashSet<string> OurEventIds =
+		[.. HardwareEvents.Definitions.Select(definition => definition.Id)];
+
+	private static bool IsOurs(EventBinding binding) => OurEventIds.Contains(binding.EventId);
 
 	private static string KeyOf(EventBinding binding) =>
 		binding.EventId
@@ -453,19 +454,6 @@ internal sealed class SensorEventEvaluator
 			JsonValueKind.Null or JsonValueKind.Undefined => null,
 			_ => json.GetRawText(),
 		};
-	}
-
-	private static string Resolve(LocalizedText text) =>
-		Resolver.Resolve(text, CultureInfo.CurrentUICulture.Name) ?? string.Empty;
-
-	private static readonly LocalizationResolver Resolver = CreateResolver();
-
-	private static LocalizationResolver CreateResolver()
-	{
-		var catalogs = new LocalizationCatalogRegistry();
-		catalogs.Register(Strings.LocalizationCatalog);
-
-		return new LocalizationResolver(catalogs);
 	}
 
 	/// <summary>The small amount of state that makes an event a transition rather than a level.</summary>

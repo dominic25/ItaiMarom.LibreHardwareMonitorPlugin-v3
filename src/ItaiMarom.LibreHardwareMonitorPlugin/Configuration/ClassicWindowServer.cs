@@ -482,11 +482,9 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 		// The page no longer carries the saved password back to the browser. Testing an edited row with
 		// an empty field therefore has to use the password the window already holds.
-		if (string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(key))
+		if (string.IsNullOrEmpty(password))
 		{
-			password = session.Opening.RemoteSources?
-				.FirstOrDefault(remote => string.Equals(remote.Key, key, StringComparison.Ordinal))
-				?.Password;
+			password = StoredPassword(session, key);
 		}
 
 		if (string.IsNullOrWhiteSpace(url))
@@ -817,13 +815,15 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 		var hasPasswords = ValuesOf(form, "remote_has_password");
 		var keys = ValuesOf(form, "remote_key");
 
-		var count = Math.Max(
+		var count = new[]
+		{
 			names.Count,
-			Math.Max(
-				urls.Count,
-				Math.Max(
-					usernames.Count,
-					Math.Max(passwords.Count, Math.Max(hasPasswords.Count, keys.Count)))));
+			urls.Count,
+			usernames.Count,
+			passwords.Count,
+			hasPasswords.Count,
+			keys.Count,
+		}.Max();
 		var remotes = new List<ClassicWindowRemote>(count);
 
 		for (var index = 0; index < count; index++)
@@ -840,12 +840,9 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 			// A blank field means "keep the saved password", not "remove it". The password never travels
 			// back to the browser, so the only way the page can say it kept one is the hidden marker.
 			if (string.IsNullOrEmpty(password)
-				&& string.Equals(At(hasPasswords, index), "1", StringComparison.Ordinal)
-				&& !string.IsNullOrEmpty(key))
+				&& string.Equals(At(hasPasswords, index), "1", StringComparison.Ordinal))
 			{
-				password = session.Opening.RemoteSources?
-					.FirstOrDefault(remote => string.Equals(remote.Key, key, StringComparison.Ordinal))
-					?.Password;
+				password = StoredPassword(session, key);
 			}
 
 			remotes.Add(new ClassicWindowRemote(
@@ -858,6 +855,17 @@ internal sealed class ClassicWindowServer : IAsyncDisposable
 
 		return remotes;
 	}
+
+	/// <summary>
+	/// The saved password for one remote row, keyed by the key that survives a rename. The password never
+	/// travels back to the browser, so an empty field is resolved here, not in the page.
+	/// </summary>
+	private static string? StoredPassword(Session session, string? key) =>
+		string.IsNullOrEmpty(key)
+			? null
+			: session.Opening.RemoteSources?
+				.FirstOrDefault(remote => string.Equals(remote.Key, key, StringComparison.Ordinal))
+				?.Password;
 
 	/// <summary>
 	/// The unit selectors, two parallel lists joined back into a sensor-to-unit map. The resource id

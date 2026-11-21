@@ -546,17 +546,7 @@ internal sealed class ElevatedHardwareSource : IHardwareSensorSource, IHardwareE
 			return;
 		}
 
-		foreach (var control in controls)
-		{
-			try
-			{
-				connection.Source.ResetControl(control.Id);
-			}
-			catch (Exception exception)
-			{
-				_logger.Debug(exception, "The control of {SensorId} could not be handed back before stopping.", control.Id);
-			}
-		}
+		ControlReset.ResetAll(controls, connection.Source.ResetControl, _logger);
 	}
 
 	/// <summary>Forgets a helper that stopped answering and falls back to the local source.</summary>
