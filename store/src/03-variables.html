@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="slides.css">
+<style>
+  .stage.vars {
+    left: 112px; top: 272px; width: 1696px; height: 486px;
+    display: flex; align-items: center; justify-content: center; gap: 24px;
+    padding: 52px;
+  }
+  .stage.vars .card { width: 380px; height: 381px; }
+  .refs {
+    position: absolute; left: 112px; right: 112px; top: 806px;
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  }
+  .refs .var-pill { font-size: 23px; padding: 15px 24px; border-radius: 16px; }
+  .refs .var-pill .tag { font-size: 14px; }
+  .foot {
+    position: absolute; left: 114px; right: 112px; top: 984px;
+    display: flex; align-items: center; gap: 12px; color: #93a0b2; font-size: 19px;
+  }
+  .foot .dot { width: 7px; height: 7px; border-radius: 50%; background: #2dd4bf; flex: none; }
+  .foot b { color: #d6dee8; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="bg"><div class="glow teal"></div><div class="grid"></div></div>
+
+  <div class="head">
+    <div class="kicker">
+      <img src="../../src/ItaiMarom.LibreHardwareMonitorPlugin/Assets/icon.svg" alt="">
+      <span class="bar"></span><span>Variables</span>
+    </div>
+    <h1>Readings, ready for any widget</h1>
+    <p class="sub">A variable carries its unit and its formatting, so a temperature reads as 61 &deg;C and a size as 512 GB without anything to append.</p>
+  </div>
+
+  <div class="stage vars">
+    <img class="card" src="captures/strip4-1.png" alt="CPU temperature and load widgets">
+    <img class="card" src="captures/strip4-3.png" alt="CPU temperature chart widget">
+    <img class="card" src="captures/strip4-2.png" alt="GPU temperature and load widgets">
+    <img class="card" src="captures/strip5-4.png" alt="GPU temperature chart widget">
+  </div>
+
+  <div class="refs">
+    <span class="var-pill"><span class="tag">Label</span><b>CPU {{ vars.cputotalload }}</b></span>
+    <span class="var-pill"><span class="tag">Action</span><b>GPU {{ vars.gputemperature }}</b></span>
+  </div>
+
+  <p class="foot"><span class="dot"></span><span>Pick them from the variable browser or type the reference &mdash; a templated action field receives the reading, not the name.</span></p>
+</div>
+</body>
+</html>

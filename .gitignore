@@ -41,3 +41,7 @@ desktop.ini
 # Logs
 *.log
 /logs/
+
+# Store screenshots generated from the plugin's window template
+/store/src/sensor-window.html
+/store/src/remote-window.html

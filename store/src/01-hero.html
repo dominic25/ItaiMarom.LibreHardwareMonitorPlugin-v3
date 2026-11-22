@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="slides.css">
+<style>
+  .hero-copy { position: absolute; left: 112px; top: 132px; width: 850px; }
+  .hero-copy h1 { font-size: 96px; margin-top: 34px; }
+  .hero-copy .sub { font-size: 30px; margin: 30px 0 0; max-width: 800px; }
+  .hero-copy .chips { margin-top: 34px; }
+  .hero-copy .note {
+    display: flex; align-items: center; gap: 12px;
+    margin: 30px 0 0; color: #8492a4; font-size: 20px;
+  }
+  .hero-copy .note .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: #2dd4bf; flex: none;
+  }
+  .hero-refs { position: absolute; left: 112px; top: 748px; display: flex; gap: 14px; }
+
+  .hero-stage { position: absolute; right: 92px; top: 100px; width: 880px; height: 880px; }
+  .hero-stage .halo {
+    position: absolute; inset: -130px;
+    background: radial-gradient(circle at 55% 45%, rgba(56,189,248,.22), rgba(45,212,191,.10) 45%, transparent 68%);
+    filter: blur(8px);
+  }
+  .deck {
+    position: absolute; inset: 0;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    padding: 18px; border-radius: 36px;
+    background: #121212;
+    border: 1px solid rgba(255,255,255,.10);
+    box-shadow: 0 60px 120px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.03) inset;
+    transform: rotate(-1.2deg);
+  }
+  .deck .card { width: 100%; height: auto; border-radius: 30px; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="bg">
+    <div class="glow teal"></div>
+    <div class="glow sky"></div>
+    <div class="grid"></div>
+  </div>
+
+  <div class="hero-copy">
+    <div class="kicker">
+      <img src="../../src/ItaiMarom.LibreHardwareMonitorPlugin/Assets/icon.svg" alt="">
+      <span>Macro Deck 3 plugin</span>
+    </div>
+    <h1>Libre Hardware<br><span class="grad">Monitor</span></h1>
+    <p class="sub">CPU, GPU, memory, storage and network sensors as Macro Deck variables &mdash; plus fan and pump control.</p>
+    <div class="chips">
+      <span class="chip"><i></i>No separate app</span>
+      <span class="chip"><i></i>Every sensor as a variable</span>
+      <span class="chip"><i></i>Fan &amp; pump control</span>
+    </div>
+    <p class="note"><span class="dot"></span>Runs without administrator rights. PawnIO and elevation are optional.</p>
+  </div>
+
+  <div class="hero-stage">
+    <div class="halo"></div>
+    <div class="deck">
+      <img class="card" src="captures/strip5-1.png" alt="CPU temperature and load widgets">
+      <img class="card" src="captures/strip5-2.png" alt="CPU temperature chart widget">
+      <img class="card" src="captures/strip5-3.png" alt="GPU temperature and load widgets">
+      <img class="card" src="captures/strip5-5.png" alt="Fan speed slider widget">
+    </div>
+  </div>
+
+  <div class="hero-refs">
+    <span class="var-pill"><span class="tag">CPU</span><b>{{ vars.cputotalload }}</b></span>
+    <span class="var-pill"><span class="tag">GPU</span><b>{{ vars.gputemperature }}</b></span>
+  </div>
+</div>
+</body>
+</html>

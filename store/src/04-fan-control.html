@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="slides.css">
+<style>
+  .fan-stage {
+    left: 112px; top: 268px; width: 620px; height: 600px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .fan-stage .card { width: 520px; height: 521px; }
+  .fan-stage .halo {
+    position: absolute; inset: 40px;
+    background: radial-gradient(circle, rgba(56,189,248,.18), transparent 68%);
+    filter: blur(6px);
+  }
+  .points { position: absolute; left: 806px; top: 280px; width: 1010px; }
+  .point { display: flex; gap: 22px; margin-bottom: 30px; }
+  .point .n {
+    flex: none; width: 44px; height: 44px; border-radius: 13px;
+    display: grid; place-items: center;
+    background: linear-gradient(135deg, rgba(45,212,191,.22), rgba(14,165,233,.22));
+    border: 1px solid rgba(127,214,230,.35);
+    color: #a9eef7; font-size: 19px; font-weight: 700;
+  }
+  .point h3 { margin: 0 0 6px; font-size: 27px; font-weight: 600; letter-spacing: -.01em; }
+  .point p { margin: 0; font-size: 22px; line-height: 1.4; color: #a8b3c1; max-width: 960px; }
+  .actions { position: absolute; left: 806px; top: 836px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .small { position: absolute; left: 806px; top: 902px; color: #7f8b9c; font-size: 18px; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="bg"><div class="glow sky"></div><div class="grid"></div></div>
+
+  <div class="head">
+    <div class="kicker">
+      <img src="../../src/ItaiMarom.LibreHardwareMonitorPlugin/Assets/icon.svg" alt="">
+      <span class="bar"></span><span>Fan &amp; pump control</span>
+    </div>
+    <h1>Drag a fan speed</h1>
+    <p class="sub">Bind the built-in Slider to any sensor with a software control. No plugin-specific widget is involved.</p>
+  </div>
+
+  <div class="stage fan-stage">
+    <div class="halo"></div>
+    <img class="card" src="captures/strip5-5.png" alt="Fan speed slider widget">
+  </div>
+
+  <div class="points">
+    <div class="point">
+      <span class="n">1</span>
+      <div><h3>Any controllable fan</h3><p>A fan or pump the hardware library can drive becomes a writable variable, marked controllable.</p></div>
+    </div>
+    <div class="point">
+      <span class="n">2</span>
+      <div><h3>Write on release</h3><p>The track takes its range from the chip; the write happens when you let go, and the slider settles on what the chip accepted.</p></div>
+    </div>
+    <div class="point">
+      <span class="n">3</span>
+      <div><h3>Hand it back</h3><p>The Restore fan control action returns one fan to the motherboard's curve; Restore all fans does it for every controllable fan.</p></div>
+    </div>
+    <div class="point">
+      <span class="n">4</span>
+      <div><h3>On by default</h3><p>Fans are handed back when Macro Deck stops, so a speed set once cannot outlive the plugin by accident.</p></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <span class="chip"><i></i>Set fan speed</span>
+    <span class="chip"><i></i>Restore fan control</span>
+    <span class="chip"><i></i>Restore all fans</span>
+  </div>
+  <p class="small">Fan control requires PawnIO and administrator rights. Every other sensor works without them.</p>
+</div>
+</body>
+</html>

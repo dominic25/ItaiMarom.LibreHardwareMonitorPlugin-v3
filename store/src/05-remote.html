@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="slides.css">
+<style>
+  .remote-frame {
+    left: 150px; top: 246px; width: 1620px; height: 744px;
+  }
+  .remote-frame iframe {
+    width: 900px; height: 520px;
+    transform: scale(1.8); transform-origin: top left;
+  }
+  .head .sub { max-width: 1560px; }
+  .under {
+    position: absolute; left: 152px; top: 1030px; right: 150px;
+    display: flex; align-items: center; gap: 12px;
+    color: #93a0b2; font-size: 19px;
+  }
+  .under .dot { width: 7px; height: 7px; border-radius: 50%; background: #2dd4bf; flex: none; }
+  .under b { color: #d6dee8; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="bg"><div class="glow teal"></div><div class="grid"></div></div>
+
+  <div class="head">
+    <div class="kicker">
+      <img src="../../src/ItaiMarom.LibreHardwareMonitorPlugin/Assets/icon.svg" alt="">
+      <span class="bar"></span><span>Remote machines</span>
+    </div>
+    <h1>Another PC on the same deck</h1>
+    <p class="sub">Add a PC running LibreHardwareMonitor's Remote Web Server; its sensors join the same tree and catalog.</p>
+  </div>
+
+  <div class="window-frame remote-frame">
+    <iframe src="remote-window.html" title="Remote machine branch in the sensor window" scrolling="no"></iframe>
+  </div>
+
+  <p class="under"><span class="dot"></span><span>A machine keeps the key it was added with, so <b>renaming it does not move</b> the variables already bound to its sensors. Remote sensors are read-only.</span></p>
+</div>
+</body>
+</html>

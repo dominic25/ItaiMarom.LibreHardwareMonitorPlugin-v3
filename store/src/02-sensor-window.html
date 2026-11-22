@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="slides.css">
+<style>
+  .window-frame.sensor { left: 112px; top: 246px; width: 1690px; height: 750px; }
+  .window-frame.sensor iframe { width: 1690px; height: 750px; }
+  .under {
+    position: absolute; left: 114px; top: 1022px; right: 112px;
+    display: flex; align-items: center; gap: 12px;
+    color: #93a0b2; font-size: 19px;
+  }
+  .under .dot { width: 7px; height: 7px; border-radius: 50%; background: #2dd4bf; flex: none; }
+  .under b { color: #d6dee8; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <div class="bg"><div class="glow sky"></div><div class="grid"></div></div>
+
+  <div class="head">
+    <div class="kicker">
+      <img src="../../src/ItaiMarom.LibreHardwareMonitorPlugin/Assets/icon.svg" alt="">
+      <span class="bar"></span><span>Sensor window</span>
+    </div>
+    <h1>Pick the sensors you want</h1>
+    <p class="sub">One window for every sensor on the machine, with a live reading beside each one.</p>
+  </div>
+
+  <div class="window-frame sensor">
+    <iframe src="sensor-window.html" title="Libre Hardware Monitor sensor window" scrolling="no"></iframe>
+  </div>
+
+  <p class="under"><span class="dot"></span><span><b>controllable</b> marks a sensor the Slider can drive &middot; anything you leave out stays one binding away in the catalog</span></p>
+</div>
+</body>
+</html>

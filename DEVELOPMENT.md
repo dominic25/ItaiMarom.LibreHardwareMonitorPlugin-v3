@@ -93,6 +93,10 @@ src/ItaiMarom.LibreHardwareMonitorPlugin/
   macrodeck-build.json                 per-RID publish recipe used by the CLI
   Assets/icon.svg                      plugin icon
   Localization/Strings.resx            default-language strings
+store/
+  01-hero.png ... 05-remote.png      the five Store screenshots, 1920x1080
+  build.ps1                          renders every slide with headless Edge
+  src/                               slide sources, widget captures and the window mockups
 tests/ItaiMarom.LibreHardwareMonitorPlugin.Tests/
 ```
 

@@ -1,0 +1,127 @@
+/* Store screenshots: 1920x1080 (16:9), composed from the real Macro Deck widgets.
+   The store renders the gallery in a 16:9 frame with object-fit: contain and
+   crops thumbnails with object-fit: cover, so every source is exactly 16:9. */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: #0d1117;
+  color: #f3f6fa;
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.slide { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+
+/* Background: soft brand glows plus a faint technical grid. */
+.bg { position: absolute; inset: 0; overflow: hidden; }
+.bg .glow {
+  position: absolute; border-radius: 50%; filter: blur(10px);
+}
+.bg .glow.teal {
+  width: 1200px; height: 1200px; left: -380px; top: -520px;
+  background: radial-gradient(circle, rgba(45, 212, 191, .17), rgba(45, 212, 191, 0) 62%);
+}
+.bg .glow.sky {
+  width: 1300px; height: 1300px; right: -460px; bottom: -620px;
+  background: radial-gradient(circle, rgba(14, 165, 233, .20), rgba(14, 165, 233, 0) 62%);
+}
+.bg .grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 25%, transparent 78%);
+}
+
+/* Type */
+.kicker {
+  display: flex; align-items: center; gap: 14px;
+  font-size: 19px; font-weight: 600; letter-spacing: .19em;
+  text-transform: uppercase; color: #7fd6e6;
+}
+.kicker img { width: 44px; height: 44px; border-radius: 11px; display: block; }
+.kicker .bar { width: 46px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, #2dd4bf, #0ea5e9); }
+
+h1 {
+  margin: 0; font-weight: 650; letter-spacing: -.035em; line-height: 1.02;
+}
+.grad {
+  background: linear-gradient(100deg, #2dd4bf 0%, #38bdf8 52%, #0ea5e9 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.sub { color: #a8b3c1; font-weight: 400; line-height: 1.45; }
+
+/* Feature chips */
+.chips { display: flex; flex-wrap: wrap; gap: 12px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 10px 18px; border: 1px solid rgba(255,255,255,.10);
+  border-radius: 999px; background: rgba(255,255,255,.035);
+  font-size: 20px; color: #dbe3ec; white-space: nowrap;
+}
+.chip i {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: linear-gradient(135deg, #2dd4bf, #0ea5e9);
+  flex: none;
+}
+
+/* Card stages: cards were captured on #121212, so every stage uses that fill. */
+.stage {
+  position: relative;
+  background: #121212;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 30px;
+  box-shadow: 0 40px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.02) inset;
+}
+.card { display: block; border-radius: 26px; }
+
+/* Floating variable reference */
+.var-pill {
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 12px 20px; border-radius: 14px;
+  background: rgba(10, 15, 22, .92);
+  border: 1px solid rgba(127, 214, 230, .35);
+  box-shadow: 0 18px 40px rgba(0,0,0,.5);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 19px; color: #d8f3f8; white-space: nowrap;
+}
+.var-pill b { color: #ffffff; font-weight: 600; }
+.var-pill .tag {
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 13px; letter-spacing: .12em; text-transform: uppercase;
+  color: #7fd6e6; font-weight: 700;
+}
+
+/* Slide header for showcase slides */
+.head { position: absolute; left: 112px; right: 112px; top: 70px; }
+.head h1 { font-size: 56px; }
+.head .sub { margin-top: 12px; font-size: 24px; max-width: 1180px; }
+.head .kicker { margin-bottom: 20px; }
+.head .kicker img { width: 34px; height: 34px; }
+
+/* Sensor window frame */
+.window-frame {
+  position: absolute; overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 46px 100px rgba(0,0,0,.6);
+  background: #16181d;
+}
+.window-frame iframe { display: block; border: 0; background: #16181d; }
+
+/* Small caption pill over a screenshot */
+.caption {
+  position: absolute; display: inline-flex; align-items: center; gap: 10px;
+  padding: 11px 18px; border-radius: 999px;
+  background: rgba(9, 13, 19, .9);
+  border: 1px solid rgba(255,255,255,.12);
+  font-size: 18px; color: #cfd8e3;
+  box-shadow: 0 16px 36px rgba(0,0,0,.45);
+}
+.caption .dot { width: 8px; height: 8px; border-radius: 50%; background: #2dd4bf; }
