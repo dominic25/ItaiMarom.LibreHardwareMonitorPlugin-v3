@@ -437,12 +437,18 @@ starts unelevated and moves the privilege into a helper it owns:
 - **The plugin starts local.** `ElevatedHardwareSource` begins with an ordinary
   `LibreHardwareMonitorSource`. The issue list says what the driver would add, and its button is
   **Enable elevated readings** when the source can be elevated.
-- **The button starts the same binary again.** `WindowsHardwareHostLauncher` starts the plugin's apphost
-  with `--hardware-host` through `Verb = "runas"`, so the UAC prompt is the one the user sees. A
-  dismissed prompt (`ERROR_CANCELLED`, 1223) is a result rather than an exception: the plugin keeps the
-  readings it already has and the issue stays up. The package ships the apphost, so the prompt names the
-  plugin rather than `dotnet`. The manifest's entrypoint stays the `.dll` - the CLI requires a
-  framework-dependent entrypoint to be a managed assembly - and the launcher finds the apphost beside it.
+- **The button starts the same binary again.** `WindowsHardwareHostLauncher` starts the plugin again with
+  `--hardware-host` through `Verb = "runas"`, so the UAC prompt is the one the user sees. A dismissed
+  prompt (`ERROR_CANCELLED`, 1223) is a result rather than an exception: the plugin keeps the readings it
+  already has and the issue stays up. It starts the **`dotnet` host that is already running the plugin**
+  with the managed entry assembly, not the apphost beside it. A UAC-elevated process does not inherit its
+  parent's environment, so `DOTNET_ROOT` cannot carry Macro Deck's private runtime across the prompt, and
+  the apphost only knows where a globally installed runtime lives - on a machine without a global .NET 10
+  it shows its "You must install .NET" dialog and never connects. The running host resolves the runtime it
+  came in on, so the helper does too. The prompt names `.NET Host` (signed by Microsoft) rather than the
+  plugin. The manifest's entrypoint stays the `.dll` - the CLI requires a framework-dependent entrypoint to
+  be a managed assembly - and the apphost is still used by a self-contained build, where the runtime sits
+  beside the application.
 - **The startup prompt is the setting, not the button.** When the stored `auto_elevate` preference is
   true, the plugin's first initialize starts the helper itself instead of waiting for the issue to be
   opened. The attempt is fire-and-forget so the host's handshake never waits for a UAC prompt, it is gated

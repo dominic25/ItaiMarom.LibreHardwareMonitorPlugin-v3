@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
@@ -120,14 +121,14 @@ internal sealed class HardwareHostConnection : IDisposable
 }
 
 /// <summary>
-/// The Windows launcher: the apphost is started with <c>Verb = "runas"</c>, so the UAC dialog is the
+/// The Windows launcher: the helper is started with <c>Verb = "runas"</c>, so the UAC dialog is the
 /// prompt the user sees. A dismissed prompt is <see cref="HardwareHostLaunchOutcome.Cancelled"/> and the
 /// plugin keeps the readings it already has.
 /// </summary>
 /// <remarks>
-/// The package ships the apphost so the UAC dialog names the plugin instead of <c>dotnet</c>. A developer
-/// run that started this process through the CLI has no apphost to relaunch, so the launcher falls back to
-/// the same <c>dotnet</c> and assembly; the helper is the same code either way.
+/// The helper is relaunched through the <c>dotnet</c> host that is already running the plugin, not
+/// through the apphost beside it - see <see cref="ResolveHost(string?, string?, string?, Func{string, bool})"/>
+/// for why. The helper is the same code either way.
 /// </remarks>
 internal sealed class WindowsHardwareHostLauncher : IHardwareHostLauncher
 {
@@ -265,34 +266,137 @@ internal sealed class WindowsHardwareHostLauncher : IHardwareHostLauncher
 			pipeSecurity: security);
 	}
 
-	/// <summary>The plugin's own apphost, or the dotnet host that is running this assembly.</summary>
-	private static (string FileName, string Prefix) ResolveHost()
+	/// <summary>
+	/// The dotnet host that is running this assembly and the argument that names it, or the apphost when
+	/// there is no such host to reuse.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// A UAC-elevated process does not inherit the environment of the process that started it, so the
+	/// helper cannot be pointed at a runtime with <c>DOTNET_ROOT</c>. It has to find the runtime on its
+	/// own, and the apphost beside the plugin only knows where to look for a globally installed one.
+	/// Macro Deck ships a private runtime that is not registered anywhere and starts plugins through it
+	/// (<c>host\runtime\dotnet.exe plugin.dll</c>), which is why the apphost fails on a machine without
+	/// a global .NET 10: it shows its "You must install .NET" dialog - hidden, because the helper is
+	/// started windowless - and the plugin waits for a helper that will never connect.
+	/// </para>
+	/// <para>
+	/// The host that is already running the plugin is the one executable guaranteed to resolve the same
+	/// runtime for the helper, whatever layout that runtime came in: give it the managed entry assembly
+	/// and it finds <c>deps.json</c> and <c>runtimeconfig.json</c> beside it. The apphost is kept for a
+	/// self-contained build, where the runtime is beside the app and no host executable exists.
+	/// </para>
+	/// </remarks>
+	private static (string FileName, string Prefix) ResolveHost() =>
+		ResolveHost(
+			Environment.ProcessPath,
+			Assembly.GetEntryAssembly()?.Location,
+			RuntimeEnvironment.GetRuntimeDirectory(),
+			File.Exists);
+
+	/// <summary>
+	/// The decision <see cref="ResolveHost()"/> makes, with the process it is deciding for passed in so
+	/// the cases can be tested without one.
+	/// </summary>
+	/// <param name="processPath">The executable running this process, when Windows reports one.</param>
+	/// <param name="entryAssembly">The managed assembly beside the apphost, when there is one.</param>
+	/// <param name="runtimeDirectory">
+	/// Where the runtime this process is using lives, which is the app directory for a self-contained
+	/// build and <c>shared\&lt;framework&gt;\&lt;version&gt;\</c> under a host for a framework-dependent one.
+	/// </param>
+	/// <param name="fileExists">Whether a path exists, so the tests do not need the files it names.</param>
+	internal static (string FileName, string Prefix) ResolveHost(
+		string? processPath,
+		string? entryAssembly,
+		string? runtimeDirectory,
+		Func<string, bool> fileExists)
 	{
-		var processPath = Environment.ProcessPath;
-		if (!string.IsNullOrEmpty(processPath)
-			&& !string.Equals(
-				Path.GetFileNameWithoutExtension(processPath),
-				"dotnet",
-				StringComparison.OrdinalIgnoreCase))
+		ArgumentNullException.ThrowIfNull(fileExists);
+
+		var dotnetHost = FindDotnetHost(processPath, runtimeDirectory, fileExists);
+		if (dotnetHost is not null && !string.IsNullOrEmpty(entryAssembly))
 		{
-			return (processPath, string.Empty);
+			return (dotnetHost, Quote(entryAssembly));
 		}
 
-		var assembly = Assembly.GetEntryAssembly()?.Location;
-		if (!string.IsNullOrEmpty(assembly))
+		var appHost = FindAppHost(processPath, entryAssembly, fileExists);
+		if (appHost is not null)
 		{
-			var appHost = Path.ChangeExtension(assembly, ".exe");
-			if (File.Exists(appHost))
-			{
-				return (appHost, string.Empty);
-			}
-
-			return (processPath ?? "dotnet.exe", Quote(assembly));
+			return (appHost, string.Empty);
 		}
 
 		throw new InvalidOperationException(
 			"The plugin cannot find its own executable to start the elevated hardware helper.");
 	}
+
+	/// <summary>
+	/// The dotnet host this process runs on: the executable itself when it is one, or the host that owns
+	/// the runtime directory when the process was started by an apphost.
+	/// </summary>
+	private static string? FindDotnetHost(
+		string? processPath,
+		string? runtimeDirectory,
+		Func<string, bool> fileExists)
+	{
+		if (IsDotnetHost(processPath))
+		{
+			return processPath;
+		}
+
+		if (string.IsNullOrEmpty(runtimeDirectory))
+		{
+			return null;
+		}
+
+		// <root>\shared\<framework>\<version>\ for a framework-dependent install. A self-contained
+		// build's runtime directory is the application directory, whose parent is not "shared".
+		var version = runtimeDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		var framework = Path.GetDirectoryName(version);
+		var shared = framework is null ? null : Path.GetDirectoryName(framework);
+		if (shared is null
+			|| !string.Equals(Path.GetFileName(shared), "shared", StringComparison.OrdinalIgnoreCase))
+		{
+			return null;
+		}
+
+		var root = Path.GetDirectoryName(shared);
+		if (root is null)
+		{
+			return null;
+		}
+
+		var candidate = Path.Combine(root, "dotnet.exe");
+		return fileExists(candidate) ? candidate : null;
+	}
+
+	/// <summary>
+	/// The apphost beside the entry assembly, or this process's own executable when it is one.
+	/// </summary>
+	private static string? FindAppHost(
+		string? processPath,
+		string? entryAssembly,
+		Func<string, bool> fileExists)
+	{
+		if (processPath is not null && !IsDotnetHost(processPath) && fileExists(processPath))
+		{
+			return processPath;
+		}
+
+		if (string.IsNullOrEmpty(entryAssembly))
+		{
+			return null;
+		}
+
+		var candidate = Path.ChangeExtension(entryAssembly, ".exe");
+		return fileExists(candidate) ? candidate : null;
+	}
+
+	private static bool IsDotnetHost(string? path) =>
+		!string.IsNullOrEmpty(path)
+		&& string.Equals(
+			Path.GetFileNameWithoutExtension(path),
+			"dotnet",
+			StringComparison.OrdinalIgnoreCase);
 
 	private static string HelperArguments(string pipeName, string token) =>
 		$"{HardwareHostOptions.Flag} --pipe {pipeName} --token {token} --parent {Environment.ProcessId}";
